@@ -339,36 +339,35 @@ export default function GullyScore() {
 
       // Innings Verification Check
       // ── Innings & Match Victory Verification Matrix (Live Evaluation) ──
+      // ── Innings & Match Victory Verification Matrix (Safeguarded Edition) ──
       const maxBalls = m.overs * 6;
       const allOut = inn.wickets >= (inn.batsmen.length - 1);
       const oversUp = inn.balls >= maxBalls;
       
-      // Target condition for Chase Innings (2nd Innings)
       const targetChasedDown = m.currentInnings === 1 && inn.target !== null && inn.runs >= inn.target;
 
-      // Rule A: Handle Instant Mid-Over Chase Victory 🌟
+      // 1. If Team 2 successfully chases the target mid-over...
       if (targetChasedDown) {
-        m.completed = true;
+        m.needsConfirmation = true; // 🌟 Freeze layout, request validation check
         m.winner = m.team2;
         m.winMargin = `${(inn.batsmen.length - 1) - inn.wickets} wickets`;
-        showToast(`Match Over! ${getTeam(m.team2)?.name} won by ${m.winMargin} 🏆`);
         return m;
       }
 
-      // Rule B: Handle Natural Over Expiry or Bowling Teams Dismissal Limits
+      // 2. If overs run out or all-out limits are reached...
       if (allOut || oversUp) {
         if (m.currentInnings === 0) {
-          // 1st Innings over -> Transition cleanly to 2nd Innings
+          // 1st Innings over -> Clear to transition to 2nd Innings
           m.currentInnings = 1;
           m.innings[1].target = inn.runs + 1;
           m.needNewBatsmen = true;
           m.needNewBowler = true;
           showToast(`Innings over! Target set: ${m.innings[1].target} runs.`);
         } else {
-          // 2nd Innings over -> Determine final results
-          m.completed = true;
-          const i1 = m.innings[0]; // 1st Innings Data Frame
-          const i2 = m.innings[1]; // 2nd Innings Data Frame
+          // End of Match Chase -> Freeze layout, request validation check
+          m.needsConfirmation = true; // 🌟 Freeze layout, request validation check
+          const i1 = m.innings[0];
+          const i2 = m.innings[1];
 
           if (i2.runs >= i1.runs + 1) {
             m.winner = m.team2;
@@ -376,11 +375,9 @@ export default function GullyScore() {
           } else if (i2.runs === i1.runs) {
             m.winner = "tie";
             m.winMargin = "Match Tied";
-            showToast("🤝 Match Tied! What a thriller!");
           } else {
             m.winner = m.team1;
             m.winMargin = `${i1.runs - i2.runs} runs`;
-            showToast(`Match Over! ${getTeam(m.team1)?.name} won by ${m.winMargin} 🏆`);
           }
         }
       }
@@ -585,10 +582,11 @@ function HomePage({ liveMatch, history, tournaments, teams, onGoLive, onNewMatch
       <div style={{padding:"24px 16px 8px", display:"flex", justifyContent:"space-between", alignItems:"center"}}>
         <div>
           <div style={{display:"flex", alignItems:"center", gap:8, marginBottom:2}}>
-            <div style={{width:32, height:32, background:"linear-gradient(135deg,#00D46A,#00A854)", borderRadius:10, display:"flex", alignItems:"center", justifyContent:"center", fontSize:18}}>🏏</div>
-            <span style={{fontFamily:"Bebas Neue", fontSize:28, letterSpacing:2, color:"var(--text)"}}>GULLY<span style={{color:"var(--green)"}}>SCORE</span></span>
+            {/* Box icon look for Box Cricket 📦 */}
+            <div style={{width:32, height:32, background:"linear-gradient(135deg,#00D46A,#00A854)", borderRadius:10, display:"flex", alignItems:"center", justifyContent:"center", fontSize:18}}>📦</div>
+            <span style={{fontFamily:"Bebas Neue", fontSize:28, letterSpacing:2, color:"var(--text)"}}>BOX <span style={{color:"var(--green)"}}>CRICKET</span></span>
           </div>
-          <div style={{fontSize:12, color:"var(--muted)", paddingLeft:40}}>Colony cricket, pro tracking</div>
+          <div style={{fontSize:12, color:"var(--muted)", paddingLeft:40}}>Indoor & turf rules, pro tracking</div>
         </div>
       </div>
 
@@ -693,39 +691,48 @@ function MatchPage({ liveMatch, teams, getTeam, applyBall, undoLastBall, onFinis
   const [wicketModal, setWicketModal] = useState(false);
   const [extraRunModal, setExtraRunModal] = useState(null); // stores { type }
 
+  // ✅ REPLACE the useEffect hook at the top of MatchPage with this version:
   useEffect(() => {
     if (!liveMatch) return;
     
-    // Always look up the real-time frame straight from the live source
     const currentInn = liveMatch.innings[liveMatch.currentInnings];
 
-    // 1. First, handle opening batsmen selection sequence
+    // STEP 1: PRIORITIZE MATCH COMPLETION 🏆
+    // If the match is potentially over, lock down the screen and hide all other selectors!
+    if (liveMatch.needsConfirmation) {
+      setBatsmanModal(false);
+      setBowlerModal(false);
+      return;
+    }
+
+    // STEP 2: Handle opening batsmen selection sequence
     if (currentInn.strikerIdx === -1 || currentInn.nonStrikerIdx === -1) {
       setBatsmanModal(true);
       setBowlerModal(false);
       return;
     }
 
-    // 2. Second, handle dynamic live mid-game wicket prompts
+    // STEP 3: Handle live mid-game wicket prompts
     if (liveMatch.needNewBatsmen) {
       setBatsmanModal(true);
       setBowlerModal(false);
       return;
     }
 
-    // 3. Third, handle regular over bowler updates
+    // STEP 4: Handle over changes (Only if the match isn't already won!)
     if (liveMatch.needNewBowler) {
       setBowlerModal(true);
       setBatsmanModal(false);
       return;
     }
 
-    // 4. Close layout layers completely when normal play resumes
+    // Close all popups when normal play resumes
     setBatsmanModal(false);
     setBowlerModal(false);
   }, [
     liveMatch?.needNewBowler, 
     liveMatch?.needNewBatsmen, 
+    liveMatch?.needsConfirmation, // 🌟 Monitored closely here
     liveMatch?.currentInnings,
     liveMatch?.innings?.[liveMatch?.currentInnings]?.strikerIdx, 
     liveMatch?.innings?.[liveMatch?.currentInnings]?.nonStrikerIdx
@@ -963,30 +970,93 @@ function MatchPage({ liveMatch, teams, getTeam, applyBall, undoLastBall, onFinis
             )}
           </div>
 
-          {/* Core Scoring Layout Grid */}
-          <div className="scoring-grid" style={{display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:8}}>
-            {[
-              {label:"0",cls:"score-btn-0",type:"runs",runs:0},
-              {label:"1",cls:"score-btn-1",type:"runs",runs:1},
-              {label:"2",cls:"score-btn-2",type:"runs",runs:2},
-              {label:"3",cls:"score-btn-3",type:"runs",runs:3},
-              {label:"4",cls:"score-btn-4",type:"runs",runs:4},
-              {label:"6",cls:"score-btn-6",type:"runs",runs:6},
-              {label:"WICKET",cls:"score-btn-W",type:"wicket",runs:0},
-              {label:"WIDE",cls:"score-btn-wide",type:"wide",runs:0},
-              {label:"NO BALL",cls:"score-btn-nb",type:"no_ball",runs:0},
-              {label:"BYE",cls:"score-btn-bye",type:"bye",runs:0},
-              {label:"LEG BYE",cls:"score-btn-lb",type:"leg_bye",runs:0},
-            ].map(b => (
-              <button key={b.label} className={`score-btn ${b.cls}`} style={{height:52, fontSize:13}} onClick={() => handleScore(b.type, b.runs)}>
-                {b.label}
-              </button>
-            ))}
-          </div>
 
-          <div style={{padding:"16px 16px 8px", display:"flex", gap:8}}>
-            <button className="btn btn-danger btn" style={{flex:1}} onClick={() => { if(window.confirm("End match and save?")) onFinish(); }}>End Match</button>
-          </div>
+          {/* Main Scoring Controls Panel wrapped with a Confirmation Guard */}
+          {liveMatch.needsConfirmation ? (
+            <div style={{
+              margin: "16px", 
+              padding: "20px", 
+              background: "linear-gradient(135deg, #1e1e2f, #151522)", 
+              border: "2px solid var(--amber)", 
+              borderRadius: "16px",
+              textAlign: "center"
+            }}>
+              <div style={{fontSize: 24, marginBottom: 4}}>🏁</div>
+              <div style={{fontSize: 18, fontWeight: 800, color: "var(--amber)", marginBottom: 4}}>
+                POTENTIAL MATCH COMPLETION
+              </div>
+              <p style={{fontSize: 13, color: "var(--muted)", marginBottom: 20}}>
+                According to the scoring ledger, <strong>{liveMatch.winner === "tie" ? "The Match is a Tie" : `${getTeam(liveMatch.winner)?.name} has won`}</strong>. Is this correct?
+              </p>
+
+              <div style={{display: "flex", flexDirection: "column", gap: 10}}>
+                {/* Action A: Commit result and save permanently */}
+                <button 
+                  className="btn btn-primary" 
+                  style={{width: "100%", padding: "14px", fontWeight: 700, borderRadius: 12}}
+                  onClick={() => {
+                    setLiveMatch(m => {
+                      const nm = JSON.parse(JSON.stringify(m));
+                      nm.completed = true; // 🌟 Now cleanly pass to MatchResultPage
+                      nm.needsConfirmation = false;
+                      return nm;
+                    });
+                  }}
+                >
+                  ✅ Yes, Confirm Result & Save
+                </button>
+
+                {/* Action B: Rollback last ball if entered by mistake */}
+                <button 
+                  className="btn btn-ghost" 
+                  style={{
+                    width: "100%", 
+                    padding: "12px", 
+                    color: "var(--red)", 
+                    border: "1px solid rgba(255,71,87,0.3)",
+                    borderRadius: 12
+                  }}
+                  onClick={() => {
+                    undoLastBall();
+                    setLiveMatch(m => {
+                      const nm = JSON.parse(JSON.stringify(m));
+                      nm.needsConfirmation = false; // Restore active play controls
+                      return nm;
+                    });
+                  }}
+                >
+                  ❌ No, Undo Last Ball (Fix Mistake)
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+              {/* Main Scoring Buttons */}
+              <div className="scoring-grid" style={{display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:8}}>
+                {[
+                  {label:"0",cls:"score-btn-0",type:"runs",runs:0},
+                  {label:"1",cls:"score-btn-1",type:"runs",runs:1},
+                  {label:"2",cls:"score-btn-2",type:"runs",runs:2},
+                  {label:"3",cls:"score-btn-3",type:"runs",runs:3},
+                  {label:"4",cls:"score-btn-4",type:"runs",runs:4},
+                  {label:"6",cls:"score-btn-6",type:"runs",runs:6},
+                  {label:"WICKET",cls:"score-btn-W",type:"wicket",runs:0},
+                  {label:"WIDE",cls:"score-btn-wide",type:"wide",runs:0},
+                  {label:"NO BALL",cls:"score-btn-nb",type:"no_ball",runs:0},
+                  {label:"BYE",cls:"score-btn-bye",type:"bye",runs:0},
+                  {label:"LEG BYE",cls:"score-btn-lb",type:"leg_bye",runs:0},
+                ].map(b => (
+                  <button key={b.label} className={`score-btn ${b.cls}`} style={{height:52, fontSize:13}} onClick={() => handleScore(b.type, b.runs)}>
+                    {b.label}
+                  </button>
+                ))}
+              </div>
+
+              <div style={{padding:"16px 16px 8px", display:"flex", gap:8}}>
+                <button className="btn btn-danger btn" style={{flex:1}} onClick={() => { if(window.confirm("End match and save?")) onFinish(); }}>End Match</button>
+              </div>
+            </>
+          )}
         </>
       )}
 
