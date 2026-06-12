@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 
+// localStorage.clear()
+
 // ─── Utility helpers ─────────────────────────────────────────────────────────
 const generateId = () => Math.random().toString(36).slice(2, 10);
 const now = () => new Date().toISOString();
@@ -17,41 +19,14 @@ const SEED = (() => {
   const teams = [
     { id:"t1", name:"Street Strikers",   color:"#00D46A", players:["Rahul S","Karan M","Vijay P","Suresh T","Manoj K","Rohit D","Arjun B","Pranav S","Deepak R","Sanjay N","Lokesh V"] },
     { id:"t2", name:"Colony Champions",  color:"#FFB800", players:["Amit J","Nikhil C","Ravi A","Sunil G","Pradeep K","Harish M","Kiran B","Vinod P","Rakesh S","Ganesh T","Srinivas R"] },
-    { id:"t3", name:"Gully Giants",       color:"#FF4757", players:["Dev K","Raj P","Aryan S","Tarun M","Vishal B","Arun C","Nitin V","Praveen D","Mahesh G","Suresh K","Ramu L"] },
-    { id:"t4", name:"Mohalla Mavericks",  color:"#5352ED", players:["Pavan R","Sai K","Charan T","Hari B","Lokesh M","Ravi S","Anil P","Balaji G","Naveen C","Suresh A","Madhu D"] },
   ];
-  const history = [
-    { id:"m1", date:"2024-12-10T10:00:00Z", team1:"t1", team2:"t2", overs:10, winner:"t1",
-      innings:[
-        { team:"t1", runs:142, wickets:4, balls:60, extras:{wide:5,noBall:2,bye:1,legBye:2},
-          batsmen:[{name:"Rahul S",runs:58,balls:32,fours:6,sixes:3},{name:"Karan M",runs:41,balls:28,fours:4,sixes:1},{name:"Vijay P",runs:23,balls:15,fours:2,sixes:1},{name:"Suresh T",runs:10,balls:8,fours:1,sixes:0}],
-          bowlers:[{name:"Amit J",overs:"3.0",runs:32,wickets:2},{name:"Nikhil C",overs:"3.0",runs:28,wickets:1},{name:"Ravi A",overs:"2.0",runs:41,wickets:1},{name:"Sunil G",overs:"2.0",runs:31,wickets:0}] },
-        { team:"t2", runs:118, wickets:8, balls:60, extras:{wide:4,noBall:1,bye:2,legBye:3},
-          batsmen:[{name:"Amit J",runs:44,balls:30,fours:4,sixes:2},{name:"Nikhil C",runs:31,balls:22,fours:3,sixes:1},{name:"Ravi A",runs:19,balls:14,fours:1,sixes:1},{name:"Sunil G",runs:12,balls:10,fours:1,sixes:0}],
-          bowlers:[{name:"Rahul S",overs:"3.0",runs:28,wickets:3},{name:"Karan M",overs:"3.0",runs:24,wickets:2},{name:"Vijay P",overs:"2.0",runs:35,wickets:1},{name:"Suresh T",overs:"2.0",runs:21,wickets:2}] }
-      ]},
-    { id:"m2", date:"2024-12-15T14:00:00Z", team1:"t3", team2:"t4", overs:5, winner:"t3",
-      innings:[
-        { team:"t3", runs:78, wickets:3, balls:30, extras:{wide:3,noBall:1,bye:0,legBye:2},
-          batsmen:[{name:"Dev K",runs:35,balls:16,fours:4,sixes:2},{name:"Raj P",runs:22,balls:12,fours:2,sixes:1},{name:"Aryan S",runs:14,balls:8,fours:1,sixes:0}],
-          bowlers:[{name:"Pavan R",overs:"2.0",runs:22,wickets:1},{name:"Sai K",overs:"2.0",runs:31,wickets:2},{name:"Charan T",overs:"1.0",runs:19,wickets:0}] },
-        { team:"t4", runs:65, wickets:6, balls:30, extras:{wide:4,noBall:0,bye:1,legBye:1},
-          batsmen:[{name:"Pavan R",runs:28,balls:15,fours:3,sixes:1},{name:"Sai K",runs:18,balls:11,fours:2,sixes:0},{name:"Charan T",runs:11,balls:8,fours:1,sixes:0}],
-          bowlers:[{name:"Dev K",overs:"2.0",runs:18,wickets:2},{name:"Raj P",overs:"2.0",runs:24,wickets:2},{name:"Aryan S",overs:"1.0",runs:19,wickets:2}] }
-      ]},
-  ];
-  const tournament = {
-    id:"tr1", name:"Mohalla Premier League", date:"2024-12-01T00:00:00Z", teams:["t1","t2","t3","t4"], overs:10, status:"ongoing",
-    matches:[
-      { id:"tm1", team1:"t1", team2:"t2", result:"t1", date:"2024-12-10T10:00:00Z", t1Runs:142, t1Balls:60, t2Runs:118, t2Balls:60 },
-      { id:"tm2", team1:"t3", team2:"t4", result:"t3", date:"2024-12-15T14:00:00Z", t1Runs:78, t1Balls:30, t2Runs:65, t2Balls:30 },
-      { id:"tm3", team1:"t1", team2:"t3", result:null, date:"2024-12-20T10:00:00Z", t1Runs:0, t1Balls:0, t2Runs:0, t2Balls:0 },
-      { id:"tm4", team1:"t2", team2:"t4", result:null, date:"2024-12-22T14:00:00Z", t1Runs:0, t1Balls:0, t2Runs:0, t2Balls:0 },
-    ]
-  };
-  return { teams, history, tournaments:[tournament] };
-})();
+  
+  // 🌟 Cleared historical entries to allow clean-slate user tracking
+  const history = [];
+  const tournaments = [];
 
+  return { teams, history, tournaments };
+})();
 // ─── Storage ──────────────────────────────────────────────────────────────────
 const LS = {
   load: (key, def) => { try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : def; } catch { return def; } },
