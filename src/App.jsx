@@ -1,0 +1,1628 @@
+import { useState, useEffect, useCallback, useRef } from "react";
+
+// ─── Utility helpers ─────────────────────────────────────────────────────────
+const generateId = () => Math.random().toString(36).slice(2, 10);
+const now = () => new Date().toISOString();
+const fmtDate = (iso) => new Date(iso).toLocaleDateString("en-IN", { day:"2-digit", month:"short", year:"numeric" });
+const fmtOvers = (balls) => `${Math.floor(balls / 6)}.${balls % 6}`;
+const calcRR = (runs, balls) => balls === 0 ? 0 : ((runs / balls) * 6).toFixed(2);
+const calcNRR = (forR, forB, agR, agB) => {
+  const rFor = forB > 0 ? (forR / forB) * 6 : 0;
+  const rAg  = agB  > 0 ? (agR  / agB)  * 6 : 0;
+  return (rFor - rAg).toFixed(3);
+};
+
+// ─── Sample seed data ─────────────────────────────────────────────────────────
+const SEED = (() => {
+  const teams = [
+    { id:"t1", name:"Street Strikers",   color:"#00D46A", players:["Rahul S","Karan M","Vijay P","Suresh T","Manoj K","Rohit D","Arjun B","Pranav S","Deepak R","Sanjay N","Lokesh V"] },
+    { id:"t2", name:"Colony Champions",  color:"#FFB800", players:["Amit J","Nikhil C","Ravi A","Sunil G","Pradeep K","Harish M","Kiran B","Vinod P","Rakesh S","Ganesh T","Srinivas R"] },
+    { id:"t3", name:"Gully Giants",       color:"#FF4757", players:["Dev K","Raj P","Aryan S","Tarun M","Vishal B","Arun C","Nitin V","Praveen D","Mahesh G","Suresh K","Ramu L"] },
+    { id:"t4", name:"Mohalla Mavericks",  color:"#5352ED", players:["Pavan R","Sai K","Charan T","Hari B","Lokesh M","Ravi S","Anil P","Balaji G","Naveen C","Suresh A","Madhu D"] },
+  ];
+  const history = [
+    { id:"m1", date:"2024-12-10T10:00:00Z", team1:"t1", team2:"t2", overs:10, winner:"t1",
+      innings:[
+        { team:"t1", runs:142, wickets:4, balls:60, extras:{wide:5,noBall:2,bye:1,legBye:2},
+          batsmen:[{name:"Rahul S",runs:58,balls:32,fours:6,sixes:3},{name:"Karan M",runs:41,balls:28,fours:4,sixes:1},{name:"Vijay P",runs:23,balls:15,fours:2,sixes:1},{name:"Suresh T",runs:10,balls:8,fours:1,sixes:0}],
+          bowlers:[{name:"Amit J",overs:"3.0",runs:32,wickets:2},{name:"Nikhil C",overs:"3.0",runs:28,wickets:1},{name:"Ravi A",overs:"2.0",runs:41,wickets:1},{name:"Sunil G",overs:"2.0",runs:31,wickets:0}] },
+        { team:"t2", runs:118, wickets:8, balls:60, extras:{wide:4,noBall:1,bye:2,legBye:3},
+          batsmen:[{name:"Amit J",runs:44,balls:30,fours:4,sixes:2},{name:"Nikhil C",runs:31,balls:22,fours:3,sixes:1},{name:"Ravi A",runs:19,balls:14,fours:1,sixes:1},{name:"Sunil G",runs:12,balls:10,fours:1,sixes:0}],
+          bowlers:[{name:"Rahul S",overs:"3.0",runs:28,wickets:3},{name:"Karan M",overs:"3.0",runs:24,wickets:2},{name:"Vijay P",overs:"2.0",runs:35,wickets:1},{name:"Suresh T",overs:"2.0",runs:21,wickets:2}] }
+      ]},
+    { id:"m2", date:"2024-12-15T14:00:00Z", team1:"t3", team2:"t4", overs:5, winner:"t3",
+      innings:[
+        { team:"t3", runs:78, wickets:3, balls:30, extras:{wide:3,noBall:1,bye:0,legBye:2},
+          batsmen:[{name:"Dev K",runs:35,balls:16,fours:4,sixes:2},{name:"Raj P",runs:22,balls:12,fours:2,sixes:1},{name:"Aryan S",runs:14,balls:8,fours:1,sixes:0}],
+          bowlers:[{name:"Pavan R",overs:"2.0",runs:22,wickets:1},{name:"Sai K",overs:"2.0",runs:31,wickets:2},{name:"Charan T",overs:"1.0",runs:19,wickets:0}] },
+        { team:"t4", runs:65, wickets:6, balls:30, extras:{wide:4,noBall:0,bye:1,legBye:1},
+          batsmen:[{name:"Pavan R",runs:28,balls:15,fours:3,sixes:1},{name:"Sai K",runs:18,balls:11,fours:2,sixes:0},{name:"Charan T",runs:11,balls:8,fours:1,sixes:0}],
+          bowlers:[{name:"Dev K",overs:"2.0",runs:18,wickets:2},{name:"Raj P",overs:"2.0",runs:24,wickets:2},{name:"Aryan S",overs:"1.0",runs:19,wickets:2}] }
+      ]},
+  ];
+  const tournament = {
+    id:"tr1", name:"Mohalla Premier League", date:"2024-12-01T00:00:00Z", teams:["t1","t2","t3","t4"], overs:10, status:"ongoing",
+    matches:[
+      { id:"tm1", team1:"t1", team2:"t2", result:"t1", date:"2024-12-10T10:00:00Z", t1Runs:142, t1Balls:60, t2Runs:118, t2Balls:60 },
+      { id:"tm2", team1:"t3", team2:"t4", result:"t3", date:"2024-12-15T14:00:00Z", t1Runs:78, t1Balls:30, t2Runs:65, t2Balls:30 },
+      { id:"tm3", team1:"t1", team2:"t3", result:null, date:"2024-12-20T10:00:00Z", t1Runs:0, t1Balls:0, t2Runs:0, t2Balls:0 },
+      { id:"tm4", team1:"t2", team2:"t4", result:null, date:"2024-12-22T14:00:00Z", t1Runs:0, t1Balls:0, t2Runs:0, t2Balls:0 },
+    ]
+  };
+  return { teams, history, tournaments:[tournament] };
+})();
+
+// ─── Storage ──────────────────────────────────────────────────────────────────
+const LS = {
+  load: (key, def) => { try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : def; } catch { return def; } },
+  save: (key, val) => { try { localStorage.setItem(key, JSON.stringify(val)); } catch {} },
+};
+
+// ─── Icons (inline SVG components) ───────────────────────────────────────────
+const Icon = {
+  Home: () => <svg viewBox="0 0 24 24" fill="currentColor" width="22" height="22"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>,
+  Cricket: () => <svg viewBox="0 0 24 24" fill="currentColor" width="22" height="22"><ellipse cx="12" cy="12" rx="10" ry="10" fill="none" stroke="currentColor" strokeWidth="2"/><line x1="8" y1="16" x2="16" y2="8" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"/><circle cx="17" cy="7" r="2.5"/></svg>,
+  Teams: () => <svg viewBox="0 0 24 24" fill="currentColor" width="22" height="22"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>,
+  History: () => <svg viewBox="0 0 24 24" fill="currentColor" width="22" height="22"><path d="M13 3a9 9 0 0 0-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42A8.954 8.954 0 0 0 13 21a9 9 0 0 0 0-18zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"/></svg>,
+  Trophy: () => <svg viewBox="0 0 24 24" fill="currentColor" width="22" height="22"><path d="M19 5h-2V3H7v2H5c-1.1 0-2 .9-2 2v1c0 2.55 1.92 4.63 4.39 4.94.63 1.5 1.98 2.63 3.61 2.96V19H7v2h10v-2h-4v-3.1c1.63-.33 2.98-1.46 3.61-2.96C19.08 12.63 21 10.55 21 8V7c0-1.1-.9-2-2-2zM5 8V7h2v3.82C5.84 10.4 5 9.3 5 8zm14 0c0 1.3-.84 2.4-2 2.82V7h2v1z"/></svg>,
+  Plus: () => <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>,
+  Back: () => <svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>,
+  Undo: () => <svg viewBox="0 0 24 24" fill="currentColor" width="22" height="22"><path d="M12.5 8c-2.65 0-5.05.99-6.9 2.6L2 7v9h9l-3.62-3.62c1.39-1.16 3.16-1.88 5.12-1.88 3.54 0 6.55 2.31 7.6 5.5l2.37-.78C21.08 11.03 17.15 8 12.5 8z"/></svg>,
+  Share: () => <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92 1.61 0 2.92-1.31 2.92-2.92s-1.31-2.92-2.92-2.92z"/></svg>,
+  Edit: () => <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>,
+  Close: () => <svg viewBox="0 0 24 24" fill="currentColor" width="22" height="22"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>,
+  Check: () => <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>,
+  Ball: () => <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16"><circle cx="12" cy="12" r="10" fill="#c0392b"/><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8 8-8z" fill="rgba(0,0,0,0.3)"/></svg>,
+  Star: () => <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>,
+  Search: () => <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>,
+  Delete: () => <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>,
+};
+
+// ─── CSS-in-JS styles ─────────────────────────────────────────────────────────
+const STYLES = `
+  @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700;800&display=swap');
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0A0E1A; --card: #131929; --card2: #1A2440;
+    --green: #00D46A; --amber: #FFB800; --red: #FF4757;
+    --blue: #5352ED; --purple: #9C27B0; --teal: #00BCD4;
+    --text: #F0F4FF; --muted: #8892AA; --border: #243050;
+    --shadow: 0 4px 24px rgba(0,0,0,0.4);
+  }
+  body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; overflow-x: hidden; }
+  .app { max-width: 480px; margin: 0 auto; min-height: 100vh; position: relative; padding-bottom: 80px; }
+  .page { animation: fadeUp .25s ease; }
+  @keyframes fadeUp { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:none; } }
+  
+  /* Nav */
+  .bottom-nav { position:fixed; bottom:0; left:50%; transform:translateX(-50%); width:100%; max-width:480px; background:var(--card); border-top:1px solid var(--border); display:flex; z-index:100; }
+  .nav-btn { flex:1; display:flex; flex-direction:column; align-items:center; gap:3px; padding:10px 4px 14px; color:var(--muted); border:none; background:none; cursor:pointer; font-size:10px; font-family:'Inter',sans-serif; font-weight:500; letter-spacing:.3px; transition:.2s; }
+  .nav-btn.active { color:var(--green); }
+  .nav-btn.active svg { filter: drop-shadow(0 0 6px var(--green)); }
+
+  /* Cards */
+  .card { background:var(--card); border:1px solid var(--border); border-radius:16px; padding:16px; margin-bottom:12px; }
+  .card2 { background:var(--card2); border-radius:12px; padding:12px; margin-bottom:8px; }
+
+  /* Header */
+  .page-header { padding:20px 16px 12px; display:flex; align-items:center; gap:12px; }
+  .page-title { font-size:22px; font-weight:800; letter-spacing:-.3px; }
+  .back-btn { width:38px; height:38px; border-radius:10px; background:var(--card2); border:1px solid var(--border); display:flex; align-items:center; justify-content:center; cursor:pointer; flex-shrink:0; }
+
+  /* Buttons */
+  .btn { border:none; cursor:pointer; font-family:'Inter',sans-serif; font-weight:700; border-radius:12px; transition:.2s; }
+  .btn-primary { background:var(--green); color:#000; padding:14px 24px; width:100%; font-size:16px; border-radius:14px; }
+  .btn-primary:active { transform:scale(.97); }
+  .btn-secondary { background:var(--card2); color:var(--text); border:1px solid var(--border); padding:12px 20px; font-size:14px; }
+  .btn-danger { background:rgba(255,71,87,.15); color:var(--red); border:1px solid rgba(255,71,87,.3); padding:10px 16px; font-size:14px; }
+  .btn-ghost { background:transparent; color:var(--muted); padding:8px 12px; font-size:13px; }
+  
+  /* Score display */
+  .score-hero { background:linear-gradient(135deg,#131929 0%,#0d1926 100%); border:1px solid var(--border); border-radius:20px; padding:20px; margin:12px 16px; }
+  .score-runs { font-family:'Bebas Neue',cursive; font-size:72px; line-height:1; color:var(--text); letter-spacing:2px; }
+  .score-wkts { font-family:'Bebas Neue',cursive; font-size:40px; color:var(--muted); }
+  .score-overs { font-size:15px; color:var(--muted); font-weight:600; margin-top:4px; }
+  .rr-badge { background:rgba(0,212,106,.12); color:var(--green); border:1px solid rgba(0,212,106,.25); padding:4px 10px; border-radius:8px; font-size:12px; font-weight:700; }
+  
+  /* Scoring buttons */
+  .scoring-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; padding:0 16px; }
+  .score-btn { height:72px; border-radius:16px; display:flex; align-items:center; justify-content:center; font-family:'Bebas Neue',cursive; font-size:28px; cursor:pointer; border:none; transition:.15s; }
+  .score-btn:active { transform:scale(.93); }
+  .score-btn-0 { background:var(--card2); color:var(--muted); }
+  .score-btn-1 { background:linear-gradient(135deg,#1a2a1a,#1e3a20); color:var(--green); border:1px solid rgba(0,212,106,.2); }
+  .score-btn-2 { background:linear-gradient(135deg,#1a2a1a,#1e3a20); color:var(--green); border:1px solid rgba(0,212,106,.2); }
+  .score-btn-3 { background:linear-gradient(135deg,#1a2a1a,#1e3a20); color:var(--green); border:1px solid rgba(0,212,106,.2); }
+  .score-btn-4 { background:linear-gradient(135deg,#1f2800,#2a3500); color:var(--amber); border:1px solid rgba(255,184,0,.2); font-size:32px; }
+  .score-btn-6 { background:linear-gradient(135deg,#2a1800,#3a2000); color:#FF6B00; border:1px solid rgba(255,107,0,.2); font-size:36px; }
+  .score-btn-W { background:linear-gradient(135deg,#2a0a10,#3a0a15); color:var(--red); border:1px solid rgba(255,71,87,.3); }
+  .score-btn-wide { background:var(--card2); color:var(--teal); font-size:14px; font-family:'Inter',sans-serif; font-weight:700; }
+  .score-btn-nb { background:var(--card2); color:#FF9F43; font-size:13px; font-family:'Inter',sans-serif; font-weight:700; }
+  .score-btn-bye { background:var(--card2); color:var(--muted); font-size:13px; font-family:'Inter',sans-serif; font-weight:700; }
+  .score-btn-lb { background:var(--card2); color:var(--muted); font-size:12px; font-family:'Inter',sans-serif; font-weight:700; }
+
+  /* Ball tracker */
+  .ball-row { display:flex; gap:6px; flex-wrap:wrap; padding:0 16px; }
+  .ball-chip { width:34px; height:34px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:13px; font-weight:700; flex-shrink:0; }
+  .bc-0 { background:#243050; color:var(--muted); }
+  .bc-1,.bc-2,.bc-3 { background:rgba(0,212,106,.15); color:var(--green); }
+  .bc-4 { background:rgba(255,184,0,.2); color:var(--amber); }
+  .bc-6 { background:rgba(255,107,0,.2); color:#FF6B00; }
+  .bc-W { background:rgba(255,71,87,.2); color:var(--red); }
+  .bc-Wd { background:rgba(0,188,212,.15); color:var(--teal); font-size:11px; }
+  .bc-NB { background:rgba(255,159,67,.15); color:#FF9F43; font-size:10px; }
+
+  /* Batsmen/Bowler strip */
+  .player-strip { padding:0 16px; display:flex; flex-direction:column; gap:8px; }
+  .ps-card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:10px 14px; display:flex; justify-content:space-between; align-items:center; }
+  .ps-name { font-weight:700; font-size:14px; }
+  .ps-stats { font-size:12px; color:var(--muted); }
+  .ps-on-strike { background:rgba(0,212,106,.07); border-color:rgba(0,212,106,.25); }
+
+  /* Match result */
+  .result-hero { background:linear-gradient(135deg,#0d2a1a,#0a1f2a); border:2px solid var(--green); border-radius:20px; padding:24px; margin:12px 16px; text-align:center; }
+
+  /* Tags */
+  .tag { display:inline-flex; align-items:center; gap:5px; padding:4px 10px; border-radius:8px; font-size:12px; font-weight:600; }
+  .tag-green { background:rgba(0,212,106,.15); color:var(--green); }
+  .tag-red { background:rgba(255,71,87,.15); color:var(--red); }
+  .tag-amber { background:rgba(255,184,0,.15); color:var(--amber); }
+  .tag-blue { background:rgba(83,82,237,.2); color:#7B7AFF; }
+  .tag-muted { background:var(--card2); color:var(--muted); }
+
+  /* Forms */
+  .input { background:var(--card2); border:1px solid var(--border); border-radius:12px; padding:12px 14px; color:var(--text); font-size:15px; font-family:'Inter',sans-serif; width:100%; outline:none; transition:.2s; }
+  .input:focus { border-color:var(--green); box-shadow:0 0 0 3px rgba(0,212,106,.1); }
+  .label { font-size:13px; color:var(--muted); font-weight:600; margin-bottom:6px; display:block; }
+  .form-group { margin-bottom:16px; }
+  
+  /* Toggle / Select chips */
+  .chip-row { display:flex; gap:8px; flex-wrap:wrap; }
+  .chip { padding:8px 16px; border-radius:10px; background:var(--card2); border:1px solid var(--border); color:var(--muted); font-size:13px; font-weight:600; cursor:pointer; transition:.15s; }
+  .chip.selected { background:rgba(0,212,106,.15); border-color:rgba(0,212,106,.4); color:var(--green); }
+  
+  /* Points table */
+  .pts-table { width:100%; border-collapse:collapse; font-size:13px; }
+  .pts-table th { color:var(--muted); font-weight:600; padding:8px 10px; text-align:left; border-bottom:1px solid var(--border); font-size:11px; letter-spacing:.5px; }
+  .pts-table td { padding:10px 10px; border-bottom:1px solid rgba(36,48,80,.5); font-weight:600; }
+  .pts-table tr:last-child td { border-bottom:none; }
+
+  /* Modal */
+  .modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,.75); z-index:200; display:flex; align-items:flex-end; justify-content:center; }
+  .modal { background:var(--card); border-radius:24px 24px 0 0; padding:24px; width:100%; max-width:480px; max-height:90vh; overflow-y:auto; animation:slideUp .25s ease; }
+  @keyframes slideUp { from { transform:translateY(40px); opacity:0; } to { transform:none; opacity:1; } }
+  .modal-handle { width:40px; height:4px; background:var(--border); border-radius:2px; margin:0 auto 20px; }
+  
+  /* Toast */
+  .toast { position:fixed; top:20px; left:50%; transform:translateX(-50%); background:#1e3a20; border:1px solid rgba(0,212,106,.3); color:var(--green); padding:12px 20px; border-radius:12px; font-weight:600; font-size:14px; z-index:300; animation:toastIn .3s ease; white-space:nowrap; }
+  @keyframes toastIn { from { opacity:0; transform:translateX(-50%) translateY(-10px); } to { opacity:1; transform:translateX(-50%) translateY(0); } }
+
+  /* Misc */
+  .divider { height:1px; background:var(--border); margin:16px 0; }
+  .section-label { font-size:11px; color:var(--muted); font-weight:700; letter-spacing:1.2px; text-transform:uppercase; padding:0 16px; margin-bottom:10px; }
+  .empty-state { text-align:center; padding:48px 24px; color:var(--muted); }
+  .empty-state svg { opacity:.3; margin-bottom:12px; }
+  .flex-between { display:flex; justify-content:space-between; align-items:center; }
+  .flex-center { display:flex; align-items:center; gap:8px; }
+  .px16 { padding:0 16px; }
+  .mb8 { margin-bottom:8px; }
+  .mb12 { margin-bottom:12px; }
+  .mb16 { margin-bottom:16px; }
+  .team-dot { width:10px; height:10px; border-radius:50%; flex-shrink:0; }
+  .over-section-label { font-size:11px; color:var(--muted); background:var(--card2); padding:2px 8px; border-radius:6px; font-weight:600; }
+  select.input option { background:var(--card); }
+  .innings-tab { flex:1; padding:10px; text-align:center; font-weight:700; font-size:13px; cursor:pointer; border:none; background:none; color:var(--muted); border-bottom:2px solid transparent; font-family:'Inter',sans-serif; }
+  .innings-tab.active { color:var(--green); border-bottom-color:var(--green); }
+  .stat-row { display:flex; gap:6px; justify-content:space-between; }
+  .stat-box { flex:1; background:var(--card2); border-radius:10px; padding:10px; text-align:center; }
+  .stat-val { font-family:'Bebas Neue',cursive; font-size:26px; color:var(--text); }
+  .stat-lbl { font-size:10px; color:var(--muted); font-weight:600; letter-spacing:.5px; }
+  .color-indicator { width:4px; height:44px; border-radius:2px; flex-shrink:0; }
+  .live-dot { width:8px; height:8px; border-radius:50%; background:var(--red); animation:pulse 1s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:.4;} }
+`;
+
+// ─── Main App ─────────────────────────────────────────────────────────────────
+
+export default function GullyScore() {
+  const [teams, setTeams]         = useState(() => LS.load("gs_teams", SEED.teams));
+  const [history, setHistory]     = useState(() => LS.load("gs_history", SEED.history));
+  const [tournaments, setTournaments] = useState(() => LS.load("gs_tournaments", SEED.tournaments));
+  const [liveMatch, setLiveMatch] = useState(() => LS.load("gs_live", null));
+  const [tab, setTab]             = useState("home");
+  const [toast, setToast]         = useState(null);
+  const [subpage, setSubpage]     = useState(null);  // { type, data }
+  const toastRef = useRef(null);
+
+  // Persist
+  useEffect(() => { LS.save("gs_teams", teams); }, [teams]);
+  useEffect(() => { LS.save("gs_history", history); }, [history]);
+  useEffect(() => { LS.save("gs_tournaments", tournaments); }, [tournaments]);
+  useEffect(() => { LS.save("gs_live", liveMatch); }, [liveMatch]);
+
+  const showToast = useCallback((msg) => {
+    setToast(msg);
+    clearTimeout(toastRef.current);
+    toastRef.current = setTimeout(() => setToast(null), 2200);
+  }, []);
+
+  const getTeam = (id) => teams.find(t => t.id === id);
+
+  // ── Scoring engine ──────────────────────────────────────────────────────────
+  const applyBall = useCallback((ball) => {
+    setLiveMatch(prev => {
+      if (!prev) return prev;
+      const m = JSON.parse(JSON.stringify(prev));
+      const inn = m.innings[m.currentInnings];
+      const isExtra = ["wide","no_ball"].includes(ball.type);
+      const isWicket = ball.type === "wicket";
+
+      // Record ball
+      const entry = { ...ball, overNum: Math.floor(inn.balls / 6), ballNum: inn.balls % 6 };
+      inn.ballHistory.push(entry);
+      if (!inn.historyStrikerIdx) inn.historyStrikerIdx = [];
+      if (!inn.historyNonStrikerIdx) inn.historyNonStrikerIdx = [];
+      if (!inn.historyBowlerIdx) inn.historyBowlerIdx = [];
+      
+      inn.historyStrikerIdx.push(inn.strikerIdx);
+      inn.historyNonStrikerIdx.push(inn.nonStrikerIdx);
+      inn.historyBowlerIdx.push(inn.currentBowlerIdx);
+
+      // Runs
+      inn.runs += ball.runs;
+      if (isExtra) {
+        inn.extras[ball.type === "wide" ? "wide" : "noBall"] += 1 + (ball.runs || 0);
+      }
+      if (ball.type === "bye") inn.extras.bye += ball.runs;
+      if (ball.type === "leg_bye") inn.extras.legBye += ball.runs;
+
+      // Wicket
+      // ✅ PASTE THIS CLEAN STATE CONTEXT LOGIC INSTEAD:
+      // Wicket
+      if (isWicket) {
+        inn.wickets += 1;
+        inn.batsmen[inn.strikerIdx].out = true;
+        inn.batsmen[inn.strikerIdx].outDesc = ball.wicketType || "out";
+        
+        // Ensure this property assignment matches exactly
+        m.needNewBatsmen = true; 
+      }
+
+      // Batsman stats (if not wide)
+      if (!isExtra) {
+        const batter = inn.batsmen[inn.strikerIdx];
+        if (batter && !isWicket) {
+          batter.runs += ball.runs || 0;
+          batter.balls += 1;
+          if (ball.runs === 4) batter.fours++;
+          if (ball.runs === 6) batter.sixes++;
+        }
+      }
+
+      // Bowler stats
+      const bowler = inn.bowlers[inn.currentBowlerIdx];
+      if (bowler) {
+        bowler.runs += ball.runs + (isExtra ? 1 : 0);
+        if (isWicket) bowler.wickets++;
+        if (!isExtra) bowler.balls++;
+      }
+
+      // Advance ball count (only legal deliveries)
+      if (!isExtra) {
+        inn.balls += 1;
+        
+        // Only handle automatic strike rotation on runs IF a wicket didn't just fall.
+        // This preserves our indices until the user explicitly selects the new player.
+        if (!isWicket && (ball.runs || 0) % 2 !== 0) {
+          [inn.strikerIdx, inn.nonStrikerIdx] = [inn.nonStrikerIdx, inn.strikerIdx];
+        }
+        
+        // End of over rotations (Only shift if the current pair survived the over)
+        if (inn.balls % 6 === 0) {
+          if (!isWicket) {
+            [inn.strikerIdx, inn.nonStrikerIdx] = [inn.nonStrikerIdx, inn.strikerIdx];
+          }
+          m.needNewBowler = true;
+        }
+      }
+
+      // Check innings end
+      const maxBalls = m.overs * 6;
+      const allOut = inn.wickets >= (inn.batsmen.length - 1);
+      const oversUp = inn.balls >= maxBalls;
+
+      if (allOut || oversUp) {
+        if (m.currentInnings === 0) {
+          // start 2nd innings
+          m.currentInnings = 1;
+          m.innings[1].target = inn.runs + 1;
+          m.needNewBatsmen = true;
+          m.needNewBowler = true;
+        } else {
+          // match over
+          m.completed = true;
+          const i1 = m.innings[0], i2 = m.innings[1];
+          if (i2.runs > i1.runs) {
+            m.winner = m.team2;
+            m.winMargin = `${(i2.batsmen.length - 1) - i2.wickets} wickets`;
+          } else if (i1.runs > i2.runs) {
+            m.winner = m.team1;
+            m.winMargin = `${i1.runs - i2.runs} runs`;
+          } else {
+            m.winner = "tie";
+          }
+        }
+      }
+      return m;
+    });
+  }, []);
+
+  // ─── FIXED UNDO SCORING ENGINE ENGINE ───────────────────────────────────────
+  const undoLastBall = useCallback(() => {
+    setLiveMatch(prev => {
+      if (!prev) return prev;
+      const m = JSON.parse(JSON.stringify(prev));
+      const inn = m.innings[m.currentInnings];
+      if (inn.ballHistory.length === 0) return prev;
+      
+      const last = inn.ballHistory.pop();
+      const isExtra = ["wide", "no_ball"].includes(last.type);
+      const isWicket = last.type === "wicket";
+
+      // 1. Reverse core global variables
+      inn.runs -= last.runs || 0;
+      if (last.type === "wide") { inn.extras.wide = Math.max(0, inn.extras.wide - 1 - (last.runs || 0)); }
+      else if (last.type === "no_ball") { inn.extras.noBall = Math.max(0, inn.extras.noBall - 1 - (last.runs || 0)); }
+      else if (last.type === "bye") { inn.extras.bye = Math.max(0, inn.extras.bye - (last.runs || 0)); }
+      else if (last.type === "leg_bye") { inn.extras.legBye = Math.max(0, inn.extras.legBye - (last.runs || 0)); }
+
+      if (isWicket) inn.wickets = Math.max(0, inn.wickets - 1);
+      if (!isExtra) inn.balls = Math.max(0, inn.balls - 1);
+
+      // 2. Clear out flag states if an over boundary or wicket was cleared
+      m.needNewBowler = false;
+      m.needNewBatsmen = false; // 👇 ADD THIS LINE HERE
+
+      // 3. Restore exact player configuration from snapshots
+      if (inn.historyStrikerIdx && inn.historyStrikerIdx.length > 0) {
+        const prevStriker = inn.historyStrikerIdx.pop();
+        
+        if (isWicket) {
+          if (inn.batsmen[prevStriker]) {
+            inn.batsmen[prevStriker].out = false;
+            inn.batsmen[prevStriker].outDesc = "";
+          }
+          inn.nextBatsmanIdx = Math.max(2, inn.nextBatsmanIdx - 1);
+        } else if (!isExtra) {
+          if (inn.batsmen[prevStriker]) {
+            inn.batsmen[prevStriker].runs = Math.max(0, inn.batsmen[prevStriker].runs - (last.runs || 0));
+            inn.batsmen[prevStriker].balls = Math.max(0, inn.batsmen[prevStriker].balls - 1);
+            if (last.runs === 4) inn.batsmen[prevStriker].fours = Math.max(0, inn.batsmen[prevStriker].fours - 1);
+            if (last.runs === 6) inn.batsmen[prevStriker].sixes = Math.max(0, inn.batsmen[prevStriker].sixes - 1);
+          }
+        }
+        inn.strikerIdx = prevStriker;
+      }
+      
+      if (inn.historyNonStrikerIdx && inn.historyNonStrikerIdx.length > 0) {
+        inn.nonStrikerIdx = inn.historyNonStrikerIdx.pop();
+      }
+      
+      if (inn.historyBowlerIdx && inn.historyBowlerIdx.length > 0) {
+        const prevBowler = inn.historyBowlerIdx.pop();
+        if (inn.bowlers[prevBowler]) {
+          inn.bowlers[prevBowler].runs = Math.max(0, inn.bowlers[prevBowler].runs - ((last.runs || 0) + (isExtra ? 1 : 0)));
+          if (isWicket) inn.bowlers[prevBowler].wickets = Math.max(0, inn.bowlers[prevBowler].wickets - 1);
+          if (!isExtra) inn.bowlers[prevBowler].balls = Math.max(0, inn.bowlers[prevBowler].balls - 1);
+        }
+        inn.currentBowlerIdx = prevBowler;
+      }
+
+      return m;
+    });
+    showToast("Last ball undone");
+  }, [showToast]);
+
+  const startMatch = useCallback((config) => {
+    const t1 = getTeam(config.team1);
+    const t2 = getTeam(config.team2);
+    
+    // Fixed typo here: changed "theme2" to "team2"
+    const firstBatId = config.battingFirst === "team2" ? config.team2 : config.team1;
+    const secondBatId = config.battingFirst === "team2" ? config.team1 : config.team2;
+    
+    const batTeamObj = getTeam(firstBatId);
+    const bowlTeamObj = getTeam(secondBatId);
+
+    const mkBatsmen = (t) => t.players.map(p => ({ name:p, runs:0, balls:0, fours:0, sixes:0, out:false, outDesc:"" }));
+    const mkBowlers = (t) => t.players.map(p => ({ name:p, balls:0, runs:0, wickets:0 }));
+    
+    const match = {
+      id: generateId(), date: now(), overs: config.overs,
+      team1: firstBatId, team2: secondBatId, 
+      currentInnings: 0, completed: false,
+      winner: null, winMargin: null,
+      needNewBatsmen: true,  // 🌟 Force the openers selection modal to pop up immediately
+      needNewBowler: true,   // Force bowler selection modal to pop up immediately
+      innings: [
+        { team: firstBatId, runs:0, wickets:0, balls:0, extras:{wide:0,noBall:0,bye:0,legBye:0},
+          batsmen: mkBatsmen(batTeamObj), bowlers: mkBowlers(bowlTeamObj),
+          strikerIdx: -1,       // 🌟 Set to -1 so no batsman is auto-selected
+          nonStrikerIdx: -1,    // 🌟 Set to -1 so no non-striker is auto-selected
+          nextBatsmanIdx: 0,    
+          currentBowlerIdx: 0,
+          ballHistory:[], target:null, historyStrikerIdx:[], historyNonStrikerIdx:[], historyBowlerIdx:[] },
+        { team: secondBatId, runs:0, wickets:0, balls:0, extras:{wide:0,noBall:0,bye:0,legBye:0},
+          batsmen: mkBatsmen(bowlTeamObj), bowlers: mkBowlers(batTeamObj),
+          strikerIdx: -1, 
+          nonStrikerIdx: -1, 
+          nextBatsmanIdx: 0, 
+          currentBowlerIdx: 0,
+          ballHistory:[], target:null, historyStrikerIdx:[], historyNonStrikerIdx:[], historyBowlerIdx:[] },
+      ]
+    };
+    setLiveMatch(match);
+    setTab("match");
+    setSubpage(null);
+    showToast("Match started! 🏏");
+  }, [teams, showToast]);
+
+  const finishMatch = useCallback(() => {
+    if (!liveMatch) return;
+    setHistory(h => [liveMatch, ...h]);
+    setLiveMatch(null);
+    setTab("history");
+    showToast("Match saved!");
+  }, [liveMatch, showToast]);
+  
+  // ── Render ──────────────────────────────────────────────────────────────────
+  const renderPage = () => {
+    if (subpage) {
+      switch (subpage.type) {
+        case "new_match": return <NewMatchPage teams={teams} onStart={startMatch} onBack={() => setSubpage(null)} />;
+        case "scorecard": return <ScorecardPage match={subpage.data} teams={teams} onBack={() => setSubpage(null)} />;
+        case "new_team": return <NewTeamPage onSave={(t) => { setTeams(ts => [...ts, t]); setSubpage(null); showToast("Team created! 🎉"); }} onBack={() => setSubpage(null)} />;
+        case "edit_team": return (<EditTeamPage team={subpage.data} onSave={(t) => { setTeams(ts => ts.map(x => x.id === t.id ? t : x)); setSubpage(null); showToast("Team updated!"); }} onBack={() => setSubpage(null)} onDelete={(id) => { setTeams(ts => ts.filter(t => t.id !== id)); setSubpage(null); showToast("Team deleted"); }} />);
+        case "new_tournament": return <NewTournamentPage teams={teams} onSave={(t) => { setTournaments(ts => [t, ...ts]); setSubpage(null); showToast("Tournament created! 🏆"); }} onBack={() => setSubpage(null)} />;
+        case "tournament": return <TournamentPage tournament={subpage.data} teams={teams} onBack={() => setSubpage(null)} onUpdate={(t) => setTournaments(ts => ts.map(x => x.id === t.id ? t : x))} />;
+      }
+    }
+    switch (tab) {
+      case "home":    return <HomePage liveMatch={liveMatch} history={history} tournaments={tournaments} teams={teams} onGoLive={() => setTab("match")} onNewMatch={() => setSubpage({type:"new_match"})} onViewMatch={(m) => setSubpage({type:"scorecard",data:m})} onViewTournament={(t) => setSubpage({type:"tournament",data:t})} getTeam={getTeam} />;
+      case "match":   return <MatchPage liveMatch={liveMatch} teams={teams} getTeam={getTeam} applyBall={applyBall} undoLastBall={undoLastBall} onFinish={finishMatch} onNewMatch={() => setSubpage({type:"new_match"})} setLiveMatch={setLiveMatch} showToast={showToast} />;
+      case "teams":   return <TeamsPage teams={teams} onNew={() => setSubpage({type:"new_team"})} onEdit={(t) => setSubpage({type:"edit_team",data:t})} history={history} />;
+      case "history": return <HistoryPage history={history} teams={teams} onView={(m) => setSubpage({type:"scorecard",data:m})} getTeam={getTeam} />;
+      case "tournament": return <TournamentsPage tournaments={tournaments} teams={teams} onNew={() => setSubpage({type:"new_tournament"})} onView={(t) => setSubpage({type:"tournament",data:t})} getTeam={getTeam} />;
+    }
+  };
+
+  const NAV = [
+    { id:"home", label:"Home", icon:<Icon.Home/> },
+    { id:"match", label:"Score", icon:<Icon.Cricket/> },
+    { id:"teams", label:"Teams", icon:<Icon.Teams/> },
+    { id:"history", label:"History", icon:<Icon.History/> },
+    { id:"tournament", label:"League", icon:<Icon.Trophy/> },
+  ];
+
+  return (
+    <>
+      <style>{STYLES}</style>
+      <div className="app">
+        {renderPage()}
+        {!subpage && (
+          <nav className="bottom-nav">
+            {NAV.map(n => (
+              <button key={n.id} className={`nav-btn ${tab===n.id?"active":""}`} onClick={() => setTab(n.id)}>
+                {n.icon} {n.label}
+              </button>
+            ))}
+          </nav>
+        )}
+        {toast && <div className="toast">{toast}</div>}
+      </div>
+    </>
+  );
+}
+
+// ─── Home Page ────────────────────────────────────────────────────────────────
+function HomePage({ liveMatch, history, tournaments, teams, onGoLive, onNewMatch, onViewMatch, onViewTournament, getTeam, onDelete }) {
+  return (
+    <div className="page">
+      {/* Logo Header */}
+      <div style={{padding:"24px 16px 8px", display:"flex", justifyContent:"space-between", alignItems:"center"}}>
+        <div>
+          <div style={{display:"flex", alignItems:"center", gap:8, marginBottom:2}}>
+            <div style={{width:32, height:32, background:"linear-gradient(135deg,#00D46A,#00A854)", borderRadius:10, display:"flex", alignItems:"center", justifyContent:"center", fontSize:18}}>🏏</div>
+            <span style={{fontFamily:"Bebas Neue", fontSize:28, letterSpacing:2, color:"var(--text)"}}>GULLY<span style={{color:"var(--green)"}}>SCORE</span></span>
+          </div>
+          <div style={{fontSize:12, color:"var(--muted)", paddingLeft:40}}>Colony cricket, pro tracking</div>
+        </div>
+      </div>
+
+      {/* Live Match Banner */}
+      {liveMatch && !liveMatch.completed && (
+        <div style={{margin:"12px 16px", background:"linear-gradient(135deg,#0d2a1a,#0a1e28)", border:"1px solid rgba(0,212,106,.3)", borderRadius:16, padding:16, cursor:"pointer"}} onClick={onGoLive}>
+          <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12}}>
+            <div style={{display:"flex", alignItems:"center", gap:8}}>
+              <div className="live-dot" /><span style={{fontWeight:700, fontSize:14, color:"var(--green)"}}>LIVE MATCH</span>
+            </div>
+            <span style={{fontSize:12, color:"var(--muted)"}}>Tap to score →</span>
+          </div>
+          <LiveMatchMini match={liveMatch} getTeam={getTeam} />
+        </div>
+      )}
+
+      {/* Quick Actions */}
+      <div style={{padding:"8px 16px", display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:4}}>
+        <button className="btn btn-primary" style={{display:"flex", alignItems:"center", justifyContent:"center", gap:8, borderRadius:14}} onClick={onNewMatch}>
+          <Icon.Plus /> New Match
+        </button>
+        <button className="btn btn-secondary btn" style={{display:"flex", alignItems:"center", justifyContent:"center", gap:8, borderRadius:14, padding:"14px 16px"}} onClick={onGoLive}>
+          <Icon.Cricket /> Scoreboard
+        </button>
+      </div>
+
+      {/* Stats strip */}
+      <div style={{padding:"8px 16px", display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:8, marginBottom:8}}>
+        {[["Matches",history.length],["Teams",teams.length],["Leagues",tournaments.length]].map(([l,v]) => (
+          <div key={l} className="card" style={{padding:"12px 10px", textAlign:"center", margin:0}}>
+            <div style={{fontFamily:"Bebas Neue", fontSize:28, color:"var(--green)"}}>{v}</div>
+            <div style={{fontSize:11, color:"var(--muted)", fontWeight:600}}>{l}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Active Tournaments */}
+      {tournaments.filter(t => t.status === "ongoing").length > 0 && (
+        <>
+          <div className="section-label" style={{marginTop:12}}>🏆 Active Leagues</div>
+          <div className="px16">
+            {tournaments.filter(t => t.status==="ongoing").slice(0,2).map(t => (
+              <TournamentCard key={t.id} t={t} teams={teams} onClick={() => onViewTournament(t)} />
+            ))}
+          </div>
+        </>
+      )}
+
+      {/* Recent Matches */}
+      <div className="section-label" style={{marginTop:12}}>🎯 Recent Matches</div>
+      <div className="px16">
+        {history.length === 0 && <div className="empty-state"><div style={{fontSize:32}}>🏏</div><div style={{marginTop:8}}>No matches yet</div></div>}
+        {history.slice(0,5).map(m => (
+          <MatchCard key={m.id} match={m} getTeam={getTeam} onClick={() => onViewMatch(m)} />
+        ))}
+      </div>
+      <div style={{height:8}} />
+    </div>
+  );
+}
+
+function LiveMatchMini({ match, getTeam }) {
+  const inn = match.innings[match.currentInnings];
+  const t = getTeam(inn.team);
+  return (
+    <div>
+      <div style={{display:"flex", justifyContent:"space-between", alignItems:"flex-end"}}>
+        <div>
+          <div style={{fontSize:13, color:"var(--muted)", marginBottom:2}}>{t?.name || "Batting"}</div>
+          <div style={{display:"flex", alignItems:"baseline", gap:6}}>
+            <span style={{fontFamily:"Bebas Neue", fontSize:42, color:"var(--text)"}}>{inn.runs}/{inn.wickets}</span>
+            <span style={{fontSize:14, color:"var(--muted)"}}>{fmtOvers(inn.balls)} ov</span>
+          </div>
+        </div>
+        <div style={{textAlign:"right"}}>
+          {match.currentInnings === 1 && inn.target && (
+            <div style={{fontSize:12, color:"var(--amber)", fontWeight:700}}>Need {inn.target - inn.runs} off {match.overs*6 - inn.balls} balls</div>
+          )}
+          <div className="rr-badge" style={{marginTop:4}}>RR {calcRR(inn.runs, inn.balls)}</div>
+        </div>
+      </div>
+      {/* last 6 balls */}
+      <div style={{display:"flex", gap:5, marginTop:10}}>
+        {inn.ballHistory.slice(-6).map((b,i) => {
+          const isExtra = ["wide","no_ball","bye","leg_bye"].includes(b.type);
+          const label = b.type==="wicket"?"W": b.type==="wide"?"Wd": b.type==="no_ball"?"NB": b.runs||"0";
+          const cls = b.type==="wicket"?"bc-W": b.type==="wide"?"bc-Wd": b.type==="no_ball"?"bc-NB": `bc-${b.runs||0}`;
+          return <div key={i} className={`ball-chip ${cls}`} style={{width:28,height:28,fontSize:11}}>{label}</div>;
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─── Match Page ───────────────────────────────────────────────────────────────
+function MatchPage({ liveMatch, teams, getTeam, applyBall, undoLastBall, onFinish, onNewMatch, setLiveMatch, showToast }) {
+  const [bowlerModal, setBowlerModal] = useState(false);
+  const [batsmanModal, setBatsmanModal] = useState(false);
+  const [editModal, setEditModal] = useState(false);
+  const [scorecardTab, setScorecardTab] = useState(null); // null=scoring, 'card'=scorecard
+  const [pendingBall, setPendingBall] = useState(null);
+  const [wicketModal, setWicketModal] = useState(false);
+
+  //  ADD THIS UPDATED VERSION INSTEAD:
+  // REPLACE the useEffect hook at the top of MatchPage with this corrected version:
+  useEffect(() => {
+    if (!liveMatch) return;
+    
+    // Always look up the real-time frame straight from the live source
+    const currentInn = liveMatch.innings[liveMatch.currentInnings];
+
+    // 1. First, handle opening batsmen selection sequence
+    if (currentInn.strikerIdx === -1 || currentInn.nonStrikerIdx === -1) {
+      setBatsmanModal(true);
+      setBowlerModal(false);
+      return;
+    }
+
+    // 2. Second, handle dynamic live mid-game wicket prompts
+    if (liveMatch.needNewBatsmen) {
+      setBatsmanModal(true);
+      setBowlerModal(false);
+      return;
+    }
+
+    // 3. Third, handle regular over bowler updates
+    if (liveMatch.needNewBowler) {
+      setBowlerModal(true);
+      setBatsmanModal(false);
+      return;
+    }
+
+    // 4. Close layout layers completely when normal play resumes
+    setBatsmanModal(false);
+    setBowlerModal(false);
+  }, [
+    liveMatch?.needNewBowler, 
+    liveMatch?.needNewBatsmen, // 🌟 Listens to wicket modal flag updates
+    liveMatch?.currentInnings,
+    liveMatch?.innings?.[liveMatch?.currentInnings]?.strikerIdx, 
+    liveMatch?.innings?.[liveMatch?.currentInnings]?.nonStrikerIdx
+  ]);
+
+  if (!liveMatch) {
+    return (
+      <div className="page">
+        <div style={{padding:"24px 16px 12px", display:"flex", alignItems:"center", gap:12}}>
+          <span style={{fontFamily:"Bebas Neue", fontSize:24, letterSpacing:1}}>SCOREBOARD</span>
+        </div>
+        <div className="empty-state" style={{paddingTop:80}}>
+          <div style={{fontSize:48, marginBottom:16}}>🏏</div>
+          <div style={{fontSize:18, fontWeight:700, marginBottom:8, color:"var(--text)"}}>No Active Match</div>
+          <div style={{marginBottom:24, fontSize:14}}>Start a new match to begin scoring</div>
+          <button className="btn btn-primary" style={{maxWidth:200, margin:"0 auto"}} onClick={onNewMatch}>Start New Match</button>
+        </div>
+      </div>
+    );
+  }
+
+  if (liveMatch.completed) return <MatchResultPage match={liveMatch} getTeam={getTeam} onSave={onFinish} onNew={onNewMatch} />;
+
+  // Verify these lines look precisely like this to safely handle unselected states:
+  const inn = liveMatch.innings[liveMatch.currentInnings];
+  const striker = inn.strikerIdx !== -1 ? inn.batsmen[inn.strikerIdx] : { name: "Select Striker", runs: 0, balls: 0, fours: 0, sixes: 0 };
+  const nonStriker = inn.nonStrikerIdx !== -1 ? inn.batsmen[inn.nonStrikerIdx] : { name: "Select Non-Striker", runs: 0, balls: 0, fours: 0, sixes: 0 };
+  const bowler = inn.bowlers[inn.currentBowlerIdx];
+  const t1 = getTeam(liveMatch.team1);
+  const t2 = getTeam(liveMatch.team2);
+  const battingTeam = getTeam(inn.team);
+  const bowlingTeam = inn.team === liveMatch.team1 ? t2 : t1;
+  const maxBalls = liveMatch.overs * 6;
+  const needRuns = liveMatch.currentInnings === 1 && inn.target ? inn.target - inn.runs : null;
+  const needBalls = maxBalls - inn.balls;
+
+  const handleScore = (type, runs) => {
+    if (type === "wicket") { setWicketModal(true); return; }
+    applyBall({ type, runs: runs || 0 });
+  };
+
+  //  ADD THIS NEW UPDATED VERSION INSTEAD:
+  // const handleWicket = (wicketType) => {
+  //   setWicketModal(false);
+  //   applyBall({ type: "wicket", runs: 0, wicketType });
+    
+  //   // Set the structural state flag so our newly updated useEffect triggers the next batsman selector safely
+  //   setLiveMatch(m => {
+  //     const nm = JSON.parse(JSON.stringify(m));
+  //     nm.needNewBatsmen = true;
+  //     return nm;
+  //   });
+  // };
+
+  const handleWicket = (wicketType) => {
+    setWicketModal(false);
+    applyBall({ type: "wicket", runs: 0, wicketType });
+  };
+
+  const selectBowler = (idx) => {
+    setLiveMatch(m => {
+      const nm = JSON.parse(JSON.stringify(m));
+      nm.innings[nm.currentInnings].currentBowlerIdx = idx;
+      nm.needNewBowler = false; 
+      return nm;
+    });
+    setBowlerModal(false);
+  };
+
+  const selectBatsman = (idx) => {
+    setLiveMatch(m => {
+      const nm = JSON.parse(JSON.stringify(m));
+      const currentInn = nm.innings[nm.currentInnings];
+
+      // Case A: Fresh Innings Setup — Striker position is empty
+      if (currentInn.strikerIdx === -1) {
+        currentInn.strikerIdx = idx;
+        nm.needNewBatsmen = true; 
+        showToast("Striker set! Now select Non-Striker 🏃");
+        return nm;
+      }
+
+      // Case B: Fresh Innings Setup — Non-Striker position is empty
+      if (currentInn.nonStrikerIdx === -1) {
+        if (idx === currentInn.strikerIdx) {
+          alert("Gully Rules Error: Same player cannot open from both ends!");
+          return m;
+        }
+        currentInn.nonStrikerIdx = idx;
+        
+        const maxSelectedIdx = Math.max(currentInn.strikerIdx, currentInn.nonStrikerIdx);
+        currentInn.nextBatsmanIdx = maxSelectedIdx + 1;
+        
+        nm.needNewBatsmen = false; 
+        showToast("Openers ready! Play ball 🏏");
+        return nm;
+      }
+
+      // Case C: Standard Mid-Game Wicket Fall (DYNAMICAL DETECTION) 🌟
+      // Check which batsman on the field is currently marked out!
+      const strikerIsOut = currentInn.batsmen[currentInn.strikerIdx]?.out;
+      const nonStrikerIsOut = currentInn.batsmen[currentInn.nonStrikerIdx]?.out;
+
+      if (strikerIsOut) {
+        currentInn.strikerIdx = idx; // Replace striker slot cleanly
+      } else if (nonStrikerIsOut) {
+        currentInn.nonStrikerIdx = idx; // Replace non-striker slot cleanly
+      } else {
+        // Safety backup fallback
+        currentInn.strikerIdx = idx;
+      }
+      
+      // Auto-advance nextBatsmanIdx past the newly chosen index safely
+      const highestActiveIdx = Math.max(currentInn.strikerIdx, currentInn.nonStrikerIdx);
+      if (idx >= currentInn.nextBatsmanIdx) {
+        currentInn.nextBatsmanIdx = highestActiveIdx + 1;
+      }
+      
+      nm.needNewBatsmen = false;
+      showToast("New batsman has taken guard!");
+      return nm;
+    });
+  };
+
+  // Current over balls
+  const currentOverStart = Math.floor(inn.balls / 6) * 6;
+  const thisOverBalls = inn.ballHistory.filter(b => {
+    const legal = !["wide","no_ball"].includes(b.type);
+    return b.overNum === Math.floor(inn.balls / 6);
+  });
+
+  return (
+    <div className="page">
+      {/* Header */}
+      <div style={{padding:"16px 16px 8px", display:"flex", justifyContent:"space-between", alignItems:"center"}}>
+        <div style={{display:"flex", alignItems:"center", gap:8}}>
+          <div className="live-dot" />
+          <span style={{fontWeight:700, fontSize:14, color:"var(--text)"}}>{battingTeam?.name}</span>
+          <span style={{fontSize:12, color:"var(--muted)"}}>vs {bowlingTeam?.name}</span>
+        </div>
+        <div style={{display:"flex", gap:8}}>
+          <button className="btn btn-ghost" style={{padding:"6px 10px"}} onClick={undoLastBall}><Icon.Undo /></button>
+          <button className="btn btn-ghost" style={{padding:"6px 10px"}} onClick={() => setScorecardTab(scorecardTab?null:"card")}>
+            {scorecardTab ? <Icon.Cricket /> : "📋"}
+          </button>
+        </div>
+      </div>
+
+      {scorecardTab === "card" ? (
+        <InlineScorecardView match={liveMatch} getTeam={getTeam} />
+      ) : (
+        <>
+          {/* Score Hero */}
+          <div className="score-hero">
+            <div style={{display:"flex", justifyContent:"space-between", alignItems:"flex-start"}}>
+              <div>
+                <div style={{fontSize:12, color:"var(--muted)", marginBottom:4, fontWeight:600}}>
+                  {liveMatch.currentInnings === 0 ? "1st Innings" : "2nd Innings"}
+                  {liveMatch.currentInnings === 1 && ` · Target: ${inn.target}`}
+                </div>
+                <div style={{display:"flex", alignItems:"baseline", gap:4}}>
+                  <span className="score-runs">{inn.runs}</span>
+                  <span className="score-wkts">/{inn.wickets}</span>
+                </div>
+                <div className="score-overs">{fmtOvers(inn.balls)} / {liveMatch.overs} overs</div>
+              </div>
+              <div style={{textAlign:"right"}}>
+                <div className="rr-badge">RR {calcRR(inn.runs, inn.balls)}</div>
+                {needRuns !== null && (
+                  <div style={{marginTop:8, fontSize:12, color: needRuns <= 12 ? "var(--green)" : "var(--amber)", fontWeight:700}}>
+                    Need {needRuns} off {needBalls}b
+                  </div>
+                )}
+                <div style={{marginTop:8, fontSize:12, color:"var(--muted)"}}>
+                  Extras: {Object.values(inn.extras).reduce((a,b)=>a+b,0)}
+                </div>
+              </div>
+            </div>
+            {/* This over */}
+            <div style={{marginTop:14, display:"flex", alignItems:"center", gap:8, flexWrap:"wrap"}}>
+              <span className="over-section-label">Over {Math.floor(inn.balls/6)+1}</span>
+              <div style={{display:"flex", gap:5, flexWrap:"wrap"}}>
+                {inn.ballHistory.filter(b => b.overNum === Math.floor(inn.balls/6)).map((b,i) => {
+                  const label = b.type==="wicket"?"W": b.type==="wide"?"Wd": b.type==="no_ball"?"NB": b.runs||"0";
+                  const cls = b.type==="wicket"?"bc-W": b.type==="wide"?"bc-Wd": b.type==="no_ball"?"bc-NB": `bc-${b.runs||0}`;
+                  return <div key={i} className={`ball-chip ${cls}`}>{label}</div>;
+                })}
+              </div>
+            </div>
+          </div>
+
+          {/* Batsmen */}
+          <div className="player-strip" style={{marginBottom:10}}>
+            {[inn.batsmen[inn.strikerIdx], inn.batsmen[inn.nonStrikerIdx]].map((b, i) => b && (
+              <div key={i} className={`ps-card ${i===0?"ps-on-strike":""}`}>
+                <div>
+                  <div className="flex-center">
+                    {i === 0 && <span style={{color:"var(--green)", fontSize:14}}>●</span>}
+                    <span className="ps-name">{b.name}</span>
+                  </div>
+                  <div className="ps-stats">SR: {b.balls > 0 ? ((b.runs/b.balls)*100).toFixed(0) : 0}</div>
+                </div>
+                <div style={{textAlign:"right"}}>
+                  <span style={{fontFamily:"Bebas Neue", fontSize:22}}>{b.runs}</span>
+                  <span style={{color:"var(--muted)", fontSize:13}}> ({b.balls})</span>
+                  <div className="ps-stats">{b.fours}×4  {b.sixes}×6</div>
+                </div>
+              </div>
+            ))}
+            {bowler && (
+              <div className="ps-card" style={{background:"rgba(83,82,237,.07)", borderColor:"rgba(83,82,237,.2)"}}>
+                <div>
+                  <div className="flex-center"><span style={{color:"#7B7AFF", fontSize:14}}>⚡</span><span className="ps-name">{bowler.name}</span></div>
+                  <div className="ps-stats">Bowling</div>
+                </div>
+                <div style={{textAlign:"right"}}>
+                  <span style={{color:"#7B7AFF", fontWeight:700}}>{fmtOvers(bowler.balls)}-{bowler.runs}-{bowler.wickets}</span>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Main Scoring Buttons */}
+          <div className="scoring-grid">
+            {[
+              {label:"0",cls:"score-btn-0",type:"runs",runs:0},
+              {label:"1",cls:"score-btn-1",type:"runs",runs:1},
+              {label:"2",cls:"score-btn-2",type:"runs",runs:2},
+              {label:"3",cls:"score-btn-3",type:"runs",runs:3},
+              {label:"4",cls:"score-btn-4",type:"runs",runs:4},
+              {label:"6",cls:"score-btn-6",type:"runs",runs:6},
+              {label:"WICKET",cls:"score-btn-W",type:"wicket",runs:0},
+              {label:"WIDE",cls:"score-btn-wide",type:"wide",runs:0},
+            ].map(b => (
+              <button key={b.label} className={`score-btn ${b.cls}`} onClick={() => handleScore(b.type, b.runs)}>
+                {b.label}
+              </button>
+            ))}
+          </div>
+          {/* Extras row */}
+          <div style={{padding:"10px 16px 0", display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:8}}>
+            {[
+              {label:"No Ball",cls:"score-btn-nb",type:"no_ball"},
+              {label:"Bye",cls:"score-btn-bye",type:"bye",runs:1},
+              {label:"Leg Bye",cls:"score-btn-lb",type:"leg_bye",runs:1},
+            ].map(b => (
+              <button key={b.label} className={`score-btn ${b.cls}`} style={{height:48, fontSize:12}} onClick={() => handleScore(b.type, b.runs||1)}>
+                {b.label}
+              </button>
+            ))}
+          </div>
+          <div style={{padding:"16px 16px 8px", display:"flex", gap:8}}>
+            <button className="btn btn-danger btn" style={{flex:1}} onClick={() => { if(window.confirm("End match and save?")) onFinish(); }}>End Match</button>
+          </div>
+        </>
+      )}
+
+      {/* Wicket Modal */}
+      {wicketModal && (
+        <div className="modal-overlay" onClick={() => setWicketModal(false)}>
+          <div className="modal" onClick={e=>e.stopPropagation()}>
+            <div className="modal-handle" />
+            <div style={{fontSize:18, fontWeight:800, marginBottom:16, color:"var(--red)"}}>🏏 Wicket! How?</div>
+            {["Bowled","Caught","LBW","Run Out","Stumped","Hit Wicket","Retired"].map(w => (
+              <button key={w} className="btn btn-secondary btn" style={{width:"100%", marginBottom:8, textAlign:"left", padding:"14px 16px"}} onClick={() => handleWicket(w)}>
+                {w}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Bowler Select Modal */}
+      {bowlerModal && (
+        <div className="modal-overlay">
+          <div className="modal">
+            <div className="modal-handle" />
+            <div style={{fontSize:18, fontWeight:800, marginBottom:16}}>⚡ Select Bowler</div>
+            {inn.bowlers.map((b, i) => (
+              <button key={i} className="btn btn-secondary btn" style={{width:"100%", marginBottom:8, textAlign:"left", padding:"14px 16px", opacity: i===inn.currentBowlerIdx && inn.balls>0 ? .5:1}} onClick={() => selectBowler(i)}>
+                <span style={{fontWeight:700}}>{b.name}</span>
+                <span style={{color:"var(--muted)", fontSize:12, marginLeft:8}}>{fmtOvers(b.balls)}-{b.runs}-{b.wickets}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Batsman Select Modal */}
+      {batsmanModal && (
+        <div className="modal-overlay">
+          <div className="modal">
+            <div className="modal-handle" />
+            <div style={{fontSize:18, fontWeight:800, marginBottom:16, color: "var(--amber)"}}>
+              {inn.strikerIdx === -1 && "🏏 Select Opening Striker"}
+              {inn.strikerIdx !== -1 && inn.nonStrikerIdx === -1 && "🏃 Select Opening Non-Striker"}
+              {inn.strikerIdx !== -1 && inn.nonStrikerIdx !== -1 && "🏏 Select New Batsman"}
+            </div>
+            {inn.batsmen.map((b, i) => !b.out && i !== inn.strikerIdx && i !== inn.nonStrikerIdx && (
+              <button 
+                key={i} 
+                className="btn btn-secondary btn" 
+                style={{width:"100%", marginBottom:8, textAlign:"left", padding:"14px 16px"}} 
+                onClick={() => selectBatsman(i)} // 🌟 CRITICAL: Must pass 'i' here
+              >
+                {b.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function InlineScorecardView({ match, getTeam }) {
+  const [tab, setTab] = useState(0);
+  const inn = match.innings[tab];
+  const battingTeam = getTeam(inn.team);
+  return (
+    <div style={{padding:"0 16px"}}>
+      <div style={{display:"flex", marginBottom:16, borderBottom:"1px solid var(--border)"}}>
+        {[0,1].map(i => (
+          <button key={i} className={`innings-tab ${tab===i?"active":""}`} onClick={() => setTab(i)}>
+            {getTeam(match.innings[i].team)?.name || `Innings ${i+1}`}
+          </button>
+        ))}
+      </div>
+      <div style={{fontFamily:"Bebas Neue", fontSize:36, color:"var(--text)", marginBottom:8}}>
+        {inn.runs}/{inn.wickets} <span style={{fontSize:20, color:"var(--muted)"}}>{fmtOvers(inn.balls)} ov</span>
+      </div>
+      <table style={{width:"100%", borderCollapse:"collapse", marginBottom:16}}>
+        <thead><tr>
+          {["Batsman","R","B","4s","6s"].map(h => <th key={h} style={{textAlign:h==="Batsman"?"left":"right", fontSize:11, color:"var(--muted)", padding:"6px 4px", borderBottom:"1px solid var(--border)", fontWeight:700, letterSpacing:.4}}>{h}</th>)}
+        </tr></thead>
+        <tbody>
+          {inn.batsmen.filter(b => b.balls > 0 || !b.out).map((b,i) => (
+            <tr key={i}>
+              <td style={{padding:"8px 4px", fontSize:13, fontWeight:b.out?400:700, color:b.out?"var(--muted)":"var(--text)"}}>
+                {b.name}{b.out ? <span style={{fontSize:11, color:"var(--muted)"}}> †</span> : ""}
+                {i === inn.strikerIdx && !b.out && <span style={{color:"var(--green)"}}> *</span>}
+              </td>
+              {[b.runs, b.balls, b.fours, b.sixes].map((v,j) => <td key={j} style={{textAlign:"right", padding:"8px 4px", fontSize:13, fontWeight:600}}>{v}</td>)}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="divider" />
+      <table style={{width:"100%", borderCollapse:"collapse"}}>
+        <thead><tr>
+          {["Bowler","O","R","W"].map(h => <th key={h} style={{textAlign:h==="Bowler"?"left":"right", fontSize:11, color:"var(--muted)", padding:"6px 4px", borderBottom:"1px solid var(--border)", fontWeight:700, letterSpacing:.4}}>{h}</th>)}
+        </tr></thead>
+        <tbody>
+          {inn.bowlers.filter(b => b.balls > 0).map((b,i) => (
+            <tr key={i}>
+              <td style={{padding:"8px 4px", fontSize:13, fontWeight:600}}>{b.name}</td>
+              <td style={{textAlign:"right", padding:"8px 4px", fontSize:13}}>{fmtOvers(b.balls)}</td>
+              <td style={{textAlign:"right", padding:"8px 4px", fontSize:13}}>{b.runs}</td>
+              <td style={{textAlign:"right", padding:"8px 4px", fontSize:13, fontWeight:700, color:b.wickets>0?"var(--green)":"var(--text)"}}>{b.wickets}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function MatchResultPage({ match, getTeam, onSave, onNew }) {
+  const t1 = getTeam(match.team1), t2 = getTeam(match.team2);
+  const i1 = match.innings[0], i2 = match.innings[1];
+  const winner = getTeam(match.winner);
+  const topBatter = [...i1.batsmen, ...i2.batsmen].sort((a,b) => b.runs-a.runs)[0];
+  const topBowler = [...i1.bowlers, ...i2.bowlers].sort((a,b) => b.wickets-a.wickets || a.runs-b.runs)[0];
+
+  return (
+    <div className="page">
+      <div style={{padding:"20px 16px 8px"}}>
+        <span style={{fontFamily:"Bebas Neue", fontSize:24}}>MATCH RESULT</span>
+      </div>
+      <div className="result-hero" style={{margin:"8px 16px", textAlign:"center"}}>
+        <div style={{fontSize:36}}>🏆</div>
+        <div style={{fontFamily:"Bebas Neue", fontSize:32, color:"var(--green)", marginTop:8}}>{winner?.name || "TIE"}</div>
+        {match.winner !== "tie" && <div style={{fontSize:15, color:"var(--muted)", marginTop:4}}>won by {match.winMargin}</div>}
+      </div>
+
+      <div style={{padding:"0 16px"}}>
+        <div className="stat-row" style={{marginBottom:12}}>
+          <div className="stat-box">
+            <div style={{fontSize:12, color:"var(--muted)", fontWeight:700, marginBottom:4}}>{t1?.name}</div>
+            <div className="stat-val">{i1.runs}/{i1.wickets}</div>
+            <div className="stat-lbl">{fmtOvers(i1.balls)} overs</div>
+          </div>
+          <div className="stat-box">
+            <div style={{fontSize:12, color:"var(--muted)", fontWeight:700, marginBottom:4}}>{t2?.name}</div>
+            <div className="stat-val">{i2.runs}/{i2.wickets}</div>
+            <div className="stat-lbl">{fmtOvers(i2.balls)} overs</div>
+          </div>
+        </div>
+
+        {topBatter && (
+          <div className="card2" style={{marginBottom:8}}>
+            <div style={{fontSize:11, color:"var(--amber)", fontWeight:700, marginBottom:6, display:"flex", alignItems:"center", gap:4}}><Icon.Star /> TOP BATTER</div>
+            <div style={{display:"flex", justifyContent:"space-between"}}>
+              <span style={{fontWeight:700}}>{topBatter.name}</span>
+              <span style={{fontFamily:"Bebas Neue", fontSize:20, color:"var(--amber)"}}>{topBatter.runs}<span style={{fontSize:13, color:"var(--muted)"}}> ({topBatter.balls})</span></span>
+            </div>
+          </div>
+        )}
+        {topBowler && topBowler.wickets > 0 && (
+          <div className="card2" style={{marginBottom:16}}>
+            <div style={{fontSize:11, color:"var(--green)", fontWeight:700, marginBottom:6, display:"flex", alignItems:"center", gap:4}}><Icon.Ball /> TOP BOWLER</div>
+            <div style={{display:"flex", justifyContent:"space-between"}}>
+              <span style={{fontWeight:700}}>{topBowler.name}</span>
+              <span style={{fontFamily:"Bebas Neue", fontSize:20, color:"var(--green)"}}>{topBowler.wickets}/{topBowler.runs}</span>
+            </div>
+          </div>
+        )}
+
+        <button className="btn btn-primary" style={{marginBottom:10}} onClick={onSave}>Save & View Scorecard</button>
+        <button className="btn btn-secondary btn" style={{width:"100%"}} onClick={onNew}>New Match</button>
+      </div>
+    </div>
+  );
+}
+
+// ─── New Match Page ───────────────────────────────────────────────────────────
+function NewMatchPage({ teams, onStart, onBack }) {
+  const [team1, setTeam1] = useState("");
+  const [team2, setTeam2] = useState("");
+  const [overs, setOvers] = useState(10);
+  const [customOvers, setCustomOvers] = useState("");
+  const [battingFirst, setBattingFirst] = useState("team1"); 
+
+  const finalOvers = overs === "custom" ? parseInt(customOvers) || 10 : overs;
+
+  return (
+    <div className="page">
+      <div className="page-header">
+        <button className="back-btn" onClick={onBack}><Icon.Back /></button>
+        <span className="page-title">New Match</span>
+      </div>
+      <div style={{padding:"0 16px"}}>
+        <div className="form-group">
+          <label className="label">Select Team 1 (Batting First)</label>
+          <select className="input" value={team1} onChange={e => setTeam1(e.target.value)}>
+            <option value="">Choose team...</option>
+            {teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+        </div>
+        <div className="form-group">
+          <label className="label">Select Team 2</label>
+          <select className="input" value={team2} onChange={e => setTeam2(e.target.value)}>
+            <option value="">Choose team...</option>
+            {teams.filter(t => t.id !== team1).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+        </div>
+        <div className="form-group">
+          <label className="label">Overs Per Innings</label>
+          <div className="chip-row">
+            {[2,5,10,20,"custom"].map(o => (
+              <div key={o} className={`chip ${overs===o?"selected":""}`} onClick={() => setOvers(o)}>
+                {o === "custom" ? "Custom" : `${o} ov`}
+              </div>
+            ))}
+          </div>
+          {overs === "custom" && (
+            <input className="input" type="number" placeholder="Enter overs" value={customOvers} onChange={e => setCustomOvers(e.target.value)} style={{marginTop:10}} />
+          )}
+        </div>
+
+        <div className="form-group">
+          <label className="label">Who bats first?</label>
+          <div className="chip-row">
+            <div className={`chip ${battingFirst === "team1" ? "selected" : ""}`} onClick={() => setBattingFirst("team1")}>
+              {teams.find(t => t.id === team1)?.name || "Team 1"}
+            </div>
+            <div className={`chip ${battingFirst === "team2" ? "selected" : ""}`} onClick={() => setBattingFirst("team2")}>
+              {teams.find(t => t.id === team2)?.name || "Team 2"}
+            </div>
+          </div>
+        </div>
+
+        {team1 && team2 && (
+          <div className="card" style={{marginBottom:16, background:"linear-gradient(135deg,#0d2a1a,#0a1e28)", borderColor:"rgba(0,212,106,.2)"}}>
+            <div style={{fontSize:12, color:"var(--muted)", marginBottom:8}}>Match Preview</div>
+            <div style={{display:"flex", justifyContent:"space-between", alignItems:"center"}}>
+              <div style={{textAlign:"center", flex:1}}>
+                <div style={{width:8, height:8, borderRadius:"50%", background:teams.find(t=>t.id===team1)?.color||"var(--green)", margin:"0 auto 4px"}} />
+                <div style={{fontWeight:700, fontSize:14}}>{teams.find(t=>t.id===team1)?.name}</div>
+              </div>
+              <div style={{fontFamily:"Bebas Neue", fontSize:24, color:"var(--muted)"}}>VS</div>
+              <div style={{textAlign:"center", flex:1}}>
+                <div style={{width:8, height:8, borderRadius:"50%", background:teams.find(t=>t.id===team2)?.color||"var(--amber)", margin:"0 auto 4px"}} />
+                <div style={{fontWeight:700, fontSize:14}}>{teams.find(t=>t.id===team2)?.name}</div>
+              </div>
+            </div>
+            <div style={{textAlign:"center", marginTop:8, fontSize:12, color:"var(--muted)"}}>{finalOvers} overs per side</div>
+          </div>
+        )}
+
+        <button
+          className="btn btn-primary"
+          disabled={!team1 || !team2}
+          onClick={() => onStart({ team1, team2, overs: finalOvers, battingFirst })}
+          style={{opacity: team1 && team2 ? 1 : .4}}
+        >
+          🏏 Start Match
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Teams Page ───────────────────────────────────────────────────────────────
+function TeamsPage({ teams, onNew, onEdit, history }) {
+  return (
+    <div className="page">
+      <div className="page-header" style={{justifyContent:"space-between"}}>
+        <span className="page-title">Teams</span>
+        <button className="btn btn-primary" style={{width:"auto", padding:"10px 18px", fontSize:14}} onClick={onNew}><Icon.Plus /></button>
+      </div>
+      <div className="px16">
+        {teams.map(t => {
+          const played = history.filter(m => m.team1===t.id || m.team2===t.id).length;
+          const won = history.filter(m => m.winner===t.id).length;
+          return (
+            <div key={t.id} className="card" style={{cursor:"pointer", display:"flex", gap:12, alignItems:"center"}} onClick={() => onEdit(t)}>
+              <div style={{width:48, height:48, borderRadius:14, background:`${t.color}22`, border:`2px solid ${t.color}`, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0}}>
+                <span style={{fontSize:22}}>🏏</span>
+              </div>
+              <div style={{flex:1}}>
+                <div style={{fontWeight:800, fontSize:15, marginBottom:2}}>{t.name}</div>
+                <div style={{fontSize:12, color:"var(--muted)"}}>{t.players.length} players · {played} matches · {won} wins</div>
+              </div>
+              <button className="btn btn-ghost" style={{padding:"6px 8px"}}><Icon.Edit /></button>
+            </div>
+          );
+        })}
+        {teams.length === 0 && <div className="empty-state"><div style={{fontSize:36}}>👥</div><div style={{marginTop:8}}>No teams yet. Create one!</div></div>}
+      </div>
+    </div>
+  );
+}
+
+function NewTeamPage({ onSave, onBack }) {
+  const [name, setName] = useState("");
+  const [color, setColor] = useState("#00D46A");
+  const [players, setPlayers] = useState(Array(11).fill("").map((_,i) => `Player ${i+1}`));
+
+  return (
+    <div className="page">
+      <div className="page-header">
+        <button className="back-btn" onClick={onBack}><Icon.Back /></button>
+        <span className="page-title">New Team</span>
+      </div>
+      <div style={{padding:"0 16px"}}>
+        <div className="form-group">
+          <label className="label">Team Name</label>
+          <input className="input" placeholder="e.g. Gully Tigers" value={name} onChange={e=>setName(e.target.value)} />
+        </div>
+        <div className="form-group">
+          <label className="label">Team Color</label>
+          <div style={{display:"flex", gap:10, flexWrap:"wrap"}}>
+            {["#00D46A","#FFB800","#FF4757","#5352ED","#FF6B00","#00BCD4","#9C27B0","#E91E63"].map(c => (
+              <div key={c} onClick={() => setColor(c)} style={{width:36, height:36, borderRadius:10, background:c, border: color===c?"3px solid white":"3px solid transparent", cursor:"pointer"}} />
+            ))}
+          </div>
+        </div>
+        <div className="form-group">
+          <label className="label">Players (minimum 2)</label>
+          {players.map((p, i) => (
+            <input key={i} className="input" style={{marginBottom:8}} placeholder={`Player ${i+1}`} value={p} onChange={e => setPlayers(ps => ps.map((v,j) => j===i ? e.target.value : v))} />
+          ))}
+          <button className="btn btn-ghost" style={{width:"100%", marginTop:4, color:"var(--green)"}} onClick={() => setPlayers(ps => [...ps, `Player ${ps.length+1}`])}>
+            + Add Player
+          </button>
+        </div>
+        <button className="btn btn-primary" disabled={!name || players.filter(p=>p.trim()).length < 2} style={{opacity: name && players.filter(p=>p.trim()).length>=2?1:.4}}
+          onClick={() => onSave({ id:generateId(), name:name.trim(), color, players:players.filter(p=>p.trim()) })}>
+          Create Team
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function EditTeamPage({ team, onSave, onBack, onDelete }) {
+  const [name, setName] = useState(team.name);
+  const [color, setColor] = useState(team.color);
+  const [players, setPlayers] = useState([...team.players]);
+  return (
+    <div className="page">
+      <div className="page-header">
+        <button className="back-btn" onClick={onBack}><Icon.Back /></button>
+        <span className="page-title">Edit Team</span>
+      </div>
+      <div style={{padding:"0 16px"}}>
+        <div className="form-group"><label className="label">Team Name</label><input className="input" value={name} onChange={e=>setName(e.target.value)} /></div>
+        <div className="form-group">
+          <label className="label">Team Color</label>
+          <div style={{display:"flex", gap:10, flexWrap:"wrap"}}>
+            {["#00D46A","#FFB800","#FF4757","#5352ED","#FF6B00","#00BCD4","#9C27B0","#E91E63"].map(c => (
+              <div key={c} onClick={() => setColor(c)} style={{width:36, height:36, borderRadius:10, background:c, border: color===c?"3px solid white":"3px solid transparent", cursor:"pointer"}} />
+            ))}
+          </div>
+        </div>
+        <div className="form-group">
+          <label className="label">Players</label>
+          {players.map((p, i) => (
+            <div key={i} style={{display:"flex", gap:8, marginBottom:8}}>
+              <input className="input" value={p} onChange={e => setPlayers(ps => ps.map((v,j) => j===i ? e.target.value : v))} />
+              <button className="btn btn-danger btn" style={{flexShrink:0, padding:"10px 12px"}} onClick={() => setPlayers(ps => ps.filter((_,j)=>j!==i))}><Icon.Delete /></button>
+            </div>
+          ))}
+          <button className="btn btn-ghost" style={{width:"100%", color:"var(--green)"}} onClick={() => setPlayers(ps => [...ps, ""])}>+ Add Player</button>
+        </div>
+        <button className="btn btn-primary" style={{marginBottom:10}} onClick={() => onSave({...team, name:name.trim(), color, players:players.filter(p=>p.trim())})}>Save Changes</button>
+        <button className="btn btn-danger btn" style={{width:"100%"}} onClick={() => { if(window.confirm("Delete this team?")) onDelete(team.id); }}>Delete Team</button>
+      </div>
+    </div>
+  );
+}
+
+// ─── History Page ─────────────────────────────────────────────────────────────
+function HistoryPage({ history, teams, onView, getTeam }) {
+  const [search, setSearch] = useState("");
+  const filtered = history.filter(m => {
+    const t1 = getTeam(m.team1)?.name || "";
+    const t2 = getTeam(m.team2)?.name || "";
+    return (t1+t2).toLowerCase().includes(search.toLowerCase());
+  });
+
+  return (
+    <div className="page">
+      <div className="page-header"><span className="page-title">Match History</span></div>
+      <div className="px16 mb12">
+        <div style={{position:"relative"}}>
+          <input className="input" placeholder="Search teams..." value={search} onChange={e => setSearch(e.target.value)} style={{paddingLeft:40}} />
+          <div style={{position:"absolute", left:12, top:"50%", transform:"translateY(-50%)", opacity:.5}}><Icon.Search /></div>
+        </div>
+      </div>
+      <div className="px16">
+        {filtered.length === 0 && <div className="empty-state"><div style={{fontSize:36}}>📋</div><div style={{marginTop:8}}>No matches found</div></div>}
+        {filtered.map(m => <MatchCard key={m.id} match={m} getTeam={getTeam} onClick={() => onView(m)} />)}
+      </div>
+    </div>
+  );
+}
+
+function MatchCard({ match, getTeam, onClick }) {
+  const t1 = getTeam(match.team1), t2 = getTeam(match.team2);
+  const i1 = match.innings?.[0], i2 = match.innings?.[1];
+  const winner = getTeam(match.winner);
+  if (!i1 || !i2) return null;
+  return (
+    <div className="card" style={{cursor:"pointer"}} onClick={onClick}>
+      <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10}}>
+        <div className="tag tag-muted" style={{fontSize:11}}>{fmtDate(match.date)}</div>
+        {winner && <div className="tag tag-green" style={{fontSize:11}}>🏆 {winner.name}</div>}
+      </div>
+      <div style={{display:"flex", justifyContent:"space-between", alignItems:"center"}}>
+        <div style={{flex:1}}>
+          <div style={{display:"flex", alignItems:"center", gap:6, marginBottom:6}}>
+            <div style={{width:8, height:8, borderRadius:"50%", background:t1?.color||"var(--green)"}} />
+            <span style={{fontWeight:700, fontSize:14}}>{t1?.name}</span>
+          </div>
+          <div style={{fontFamily:"Bebas Neue", fontSize:24}}>{i1.runs}/{i1.wickets} <span style={{fontSize:14, color:"var(--muted)"}}>{fmtOvers(i1.balls)} ov</span></div>
+        </div>
+        <div style={{fontFamily:"Bebas Neue", fontSize:16, color:"var(--muted)", padding:"0 12px"}}>VS</div>
+        <div style={{flex:1, textAlign:"right"}}>
+          <div style={{display:"flex", alignItems:"center", gap:6, marginBottom:6, justifyContent:"flex-end"}}>
+            <span style={{fontWeight:700, fontSize:14}}>{t2?.name}</span>
+            <div style={{width:8, height:8, borderRadius:"50%", background:t2?.color||"var(--amber)"}} />
+          </div>
+          <div style={{fontFamily:"Bebas Neue", fontSize:24}}>{i2.runs}/{i2.wickets} <span style={{fontSize:14, color:"var(--muted)"}}>{fmtOvers(i2.balls)} ov</span></div>
+        </div>
+      </div>
+    </div>
+  );
+}
+// ─── Scorecard Page ───────────────────────────────────────────────────────────
+function ScorecardPage({ match, teams, onBack }) {
+  const getTeam = (id) => teams.find(t => t.id === id);
+  const [tab, setTab] = useState(0);
+  const inn = match.innings[tab];
+  const battingTeam = getTeam(inn.team);
+  const bowlingTeam = getTeam(inn.team === match.team1 ? match.team2 : match.team1);
+  const winner = getTeam(match.winner);
+  const winnerInnings = winner ? match.innings.find(i => i.team === winner.id) : null;
+  const totalExtras = Object.values(inn.extras).reduce((a,b)=>a+b,0);
+
+  return (
+    <div className="page">
+      <div className="page-header">
+        <button className="back-btn" onClick={onBack}><Icon.Back /></button>
+        <div>
+          <div className="page-title">{getTeam(match.team1)?.name} vs {getTeam(match.team2)?.name}</div>
+          <div style={{fontSize:11, color:"var(--muted)"}}>{fmtDate(match.date)} · {match.overs} overs</div>
+        </div>
+      </div>
+
+      {winner && (
+        <div style={{margin:"0 16px 12px", background:"linear-gradient(90deg,rgba(0,212,106,.1),transparent)", border:"1px solid rgba(0,212,106,.2)", borderRadius:12, padding:"10px 14px", display:"flex", alignItems:"center", gap:8}}>
+          <span style={{fontSize:18}}>🏆</span>
+          <span style={{fontWeight:700, color:"var(--green)", fontSize:14}}>
+            {winner.name} won {match.winner==="tie" ? "(Tie)" : `by ${match.winMargin}`}
+          </span>
+        </div>
+      )}
+
+      <div style={{display:"flex", margin:"0 16px 16px", borderBottom:"1px solid var(--border)"}}>
+        {[0,1].map(i => (
+          <button key={i} className={`innings-tab ${tab===i?"active":""}`} onClick={() => setTab(i)}>
+            {getTeam(match.innings[i].team)?.name}
+          </button>
+        ))}
+      </div>
+
+      <div className="px16">
+        <div style={{display:"flex", justifyContent:"space-between", alignItems:"baseline", marginBottom:12}}>
+          <div style={{fontFamily:"Bebas Neue", fontSize:40}}>{inn.runs}/{inn.wickets}</div>
+          <div style={{color:"var(--muted)", fontSize:14}}>{fmtOvers(inn.balls)} overs · RR {calcRR(inn.runs, inn.balls)}</div>
+        </div>
+
+        {/* Batting */}
+        <div style={{fontWeight:700, fontSize:12, color:"var(--muted)", letterSpacing:.8, marginBottom:8}}>BATTING</div>
+        <div style={{overflowX:"auto", marginBottom:16}}>
+          <table style={{width:"100%", borderCollapse:"collapse", minWidth:280}}>
+            <thead><tr>
+              {["Batsman","R","B","4s","6s","SR"].map(h => <th key={h} className="pts-table" style={{textAlign:h==="Batsman"?"left":"right", fontSize:11, color:"var(--muted)", padding:"6px 4px", borderBottom:"1px solid var(--border)"}}>{h}</th>)}
+            </tr></thead>
+            <tbody>
+              {inn.batsmen.filter(b => b.balls > 0).map((b,i) => {
+                const sr = b.balls > 0 ? ((b.runs/b.balls)*100).toFixed(0) : "-";
+                return (
+                  <tr key={i}>
+                    <td style={{padding:"8px 4px", fontSize:13, fontWeight:b.out?400:700, color:b.out?"var(--muted)":"var(--text)"}}>
+                      {b.name} {b.out && <span style={{fontSize:11, color:"var(--muted)"}}>({b.outDesc})</span>}
+                    </td>
+                    {[b.runs,b.balls,b.fours,b.sixes,sr].map((v,j) => <td key={j} style={{textAlign:"right", padding:"8px 4px", fontSize:13, fontWeight: j===0?"700":"500"}}>{v}</td>)}
+                  </tr>
+                );
+              })}
+              <tr><td colSpan={6} style={{padding:"8px 4px", fontSize:12, color:"var(--muted)"}}>Extras: {totalExtras} (W {inn.extras.wide}, NB {inn.extras.noBall}, B {inn.extras.bye}, LB {inn.extras.legBye})</td></tr>
+              <tr style={{borderTop:"1px solid var(--border)"}}><td style={{padding:"8px 4px", fontWeight:800, fontSize:14}}>Total</td><td colSpan={5} style={{textAlign:"right", padding:"8px 4px", fontWeight:800, fontSize:14}}>{inn.runs}/{inn.wickets} ({fmtOvers(inn.balls)} ov)</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        {/* Bowling */}
+        <div style={{fontWeight:700, fontSize:12, color:"var(--muted)", letterSpacing:.8, marginBottom:8}}>BOWLING</div>
+        <table style={{width:"100%", borderCollapse:"collapse", marginBottom:24}}>
+          <thead><tr>
+            {["Bowler","O","M","R","W","Econ"].map(h => <th key={h} style={{textAlign:h==="Bowler"?"left":"right", fontSize:11, color:"var(--muted)", padding:"6px 4px", borderBottom:"1px solid var(--border)", fontWeight:700}}>{h}</th>)}
+          </tr></thead>
+          <tbody>
+            {inn.bowlers.filter(b => b.balls > 0).map((b,i) => {
+              const econ = b.balls > 0 ? ((b.runs/(b.balls/6))).toFixed(1) : "-";
+              return (
+                <tr key={i}>
+                  <td style={{padding:"8px 4px", fontSize:13, fontWeight:600}}>{b.name}</td>
+                  <td style={{textAlign:"right", padding:"8px 4px", fontSize:13}}>{fmtOvers(b.balls)}</td>
+                  <td style={{textAlign:"right", padding:"8px 4px", fontSize:13}}>0</td>
+                  <td style={{textAlign:"right", padding:"8px 4px", fontSize:13}}>{b.runs}</td>
+                  <td style={{textAlign:"right", padding:"8px 4px", fontSize:13, fontWeight:700, color:b.wickets>0?"var(--green)":"var(--text)"}}>{b.wickets}</td>
+                  <td style={{textAlign:"right", padding:"8px 4px", fontSize:13}}>{econ}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ─── Tournaments Page ─────────────────────────────────────────────────────────
+function TournamentsPage({ tournaments, teams, onNew, onView, getTeam }) {
+  return (
+    <div className="page">
+      <div className="page-header" style={{justifyContent:"space-between"}}>
+        <span className="page-title">Leagues</span>
+        <button className="btn btn-primary" style={{width:"auto", padding:"10px 18px", fontSize:14}} onClick={onNew}><Icon.Plus /></button>
+      </div>
+      <div className="px16">
+        {tournaments.length === 0 && <div className="empty-state"><div style={{fontSize:36}}>🏆</div><div style={{marginTop:8}}>No leagues yet</div></div>}
+        {tournaments.map(t => <TournamentCard key={t.id} t={t} teams={teams} onClick={() => onView(t)} />)}
+      </div>
+    </div>
+  );
+}
+
+function TournamentCard({ t, teams, onClick }) {
+  const getTeam = (id) => teams.find(x => x.id === id);
+  const completed = t.matches.filter(m => m.result).length;
+  return (
+    <div className="card" style={{cursor:"pointer"}} onClick={onClick}>
+      <div style={{display:"flex", justifyContent:"space-between", marginBottom:8}}>
+        <span style={{fontWeight:800, fontSize:16}}>{t.name}</span>
+        <span className={`tag ${t.status==="ongoing"?"tag-green":"tag-muted"}`}>{t.status==="ongoing"?"🟢 Ongoing":"Completed"}</span>
+      </div>
+      <div style={{fontSize:12, color:"var(--muted)", marginBottom:10}}>{fmtDate(t.date)} · {t.teams.length} teams · {t.overs} ov</div>
+      <div style={{display:"flex", gap:4, flexWrap:"wrap", marginBottom:8}}>
+        {t.teams.map(id => {
+          const team = getTeam(id);
+          return team ? <div key={id} className="tag tag-muted" style={{fontSize:11, gap:4}}><div style={{width:6, height:6, borderRadius:"50%", background:team.color}} />{team.name}</div> : null;
+        })}
+      </div>
+      <div style={{fontSize:12, color:"var(--muted)"}}>{completed}/{t.matches.length} matches played</div>
+    </div>
+  );
+}
+
+function NewTournamentPage({ teams, onSave, onBack }) {
+  const [name, setName] = useState("");
+  const [selectedTeams, setSelectedTeams] = useState([]);
+  const [overs, setOvers] = useState(10);
+
+  const toggleTeam = (id) => setSelectedTeams(ts => ts.includes(id) ? ts.filter(t=>t!==id) : [...ts, id]);
+
+  const generateMatches = (teamIds) => {
+    const matches = [];
+    for (let i = 0; i < teamIds.length; i++) {
+      for (let j = i+1; j < teamIds.length; j++) {
+        matches.push({ id:generateId(), team1:teamIds[i], team2:teamIds[j], result:null, date:new Date(Date.now() + matches.length*86400000*2).toISOString(), t1Runs:0, t1Balls:0, t2Runs:0, t2Balls:0 });
+      }
+    }
+    return matches;
+  };
+
+  return (
+    <div className="page">
+      <div className="page-header">
+        <button className="back-btn" onClick={onBack}><Icon.Back /></button>
+        <span className="page-title">New League</span>
+      </div>
+      <div style={{padding:"0 16px"}}>
+        <div className="form-group"><label className="label">League Name</label><input className="input" placeholder="e.g. Mohalla Premier League" value={name} onChange={e=>setName(e.target.value)} /></div>
+        <div className="form-group">
+          <label className="label">Overs</label>
+          <div className="chip-row">
+            {[5,10,20].map(o => <div key={o} className={`chip ${overs===o?"selected":""}`} onClick={()=>setOvers(o)}>{o} ov</div>)}
+          </div>
+        </div>
+        <div className="form-group">
+          <label className="label">Select Teams (minimum 2)</label>
+          {teams.map(t => (
+            <div key={t.id} className={`card2 ${selectedTeams.includes(t.id)?"":"opacity-70"}`} style={{cursor:"pointer", display:"flex", alignItems:"center", gap:10, border:`1px solid ${selectedTeams.includes(t.id)?"rgba(0,212,106,.3)":"var(--border)"}`}} onClick={() => toggleTeam(t.id)}>
+              <div style={{width:10, height:10, borderRadius:"50%", background:t.color}} />
+              <span style={{fontWeight:700, flex:1}}>{t.name}</span>
+              {selectedTeams.includes(t.id) && <Icon.Check />}
+            </div>
+          ))}
+        </div>
+        <button className="btn btn-primary" disabled={!name || selectedTeams.length < 2} style={{opacity: name && selectedTeams.length>=2?1:.4}}
+          onClick={() => onSave({ id:generateId(), name:name.trim(), date:now(), teams:selectedTeams, overs, status:"ongoing", matches:generateMatches(selectedTeams) })}>
+          Create League
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function TournamentPage({ tournament, teams, onBack, onUpdate }) {
+  const getTeam = (id) => teams.find(t => t.id === id);
+  const [activeTab, setActiveTab] = useState("schedule");
+
+  // Points table calc
+  const pts = tournament.teams.map(id => {
+    const team = getTeam(id);
+    const tMatches = tournament.matches.filter(m => m.result && (m.team1===id || m.team2===id));
+    const wins = tMatches.filter(m => m.result===id).length;
+    const losses = tMatches.length - wins;
+    // NRR
+    let forR=0, forB=0, agR=0, agB=0;
+    tMatches.forEach(m => {
+      if (m.team1 === id) { forR += m.t1Runs; forB += m.t1Balls; agR += m.t2Runs; agB += m.t2Balls; }
+      else { forR += m.t2Runs; forB += m.t2Balls; agR += m.t1Runs; agB += m.t1Balls; }
+    });
+    return { id, name:team?.name||id, color:team?.color||"var(--green)", played:tMatches.length, wins, losses, pts:wins*2, nrr:calcNRR(forR,forB,agR,agB) };
+  }).sort((a,b) => b.pts-a.pts || parseFloat(b.nrr)-parseFloat(a.nrr));
+
+  return (
+    <div className="page">
+      <div className="page-header">
+        <button className="back-btn" onClick={onBack}><Icon.Back /></button>
+        <div>
+          <div className="page-title" style={{fontSize:18}}>{tournament.name}</div>
+          <div style={{fontSize:11, color:"var(--muted)"}}>{tournament.overs} ov · {tournament.teams.length} teams</div>
+        </div>
+      </div>
+
+      <div style={{display:"flex", margin:"0 16px 16px", borderBottom:"1px solid var(--border)"}}>
+        {[["schedule","Schedule"],["points","Points"]].map(([id,label]) => (
+          <button key={id} className={`innings-tab ${activeTab===id?"active":""}`} onClick={() => setActiveTab(id)}>{label}</button>
+        ))}
+      </div>
+
+      {activeTab === "points" && (
+        <div className="px16">
+          <div className="card" style={{padding:"8px 0"}}>
+            <table className="pts-table" style={{width:"100%"}}>
+              <thead><tr>
+                <th>Team</th><th style={{textAlign:"center"}}>P</th><th style={{textAlign:"center"}}>W</th><th style={{textAlign:"center"}}>L</th><th style={{textAlign:"right"}}>NRR</th><th style={{textAlign:"right"}}>Pts</th>
+              </tr></thead>
+              <tbody>
+                {pts.map((p, i) => (
+                  <tr key={p.id}>
+                    <td><div style={{display:"flex", alignItems:"center", gap:6}}><div style={{width:8, height:8, borderRadius:"50%", background:p.color}} />{p.name}</div></td>
+                    <td style={{textAlign:"center"}}>{p.played}</td>
+                    <td style={{textAlign:"center", color:"var(--green)"}}>{p.wins}</td>
+                    <td style={{textAlign:"center", color:"var(--red)"}}>{p.losses}</td>
+                    <td style={{textAlign:"right", fontSize:12, color: parseFloat(p.nrr)>=0?"var(--green)":"var(--red)"}}>{p.nrr}</td>
+                    <td style={{textAlign:"right", fontFamily:"Bebas Neue", fontSize:18, color:"var(--amber)"}}>{p.pts}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {activeTab === "schedule" && (
+        <div className="px16">
+          {tournament.matches.map(m => {
+            const t1 = getTeam(m.team1), t2 = getTeam(m.team2);
+            const winner = getTeam(m.result);
+            return (
+              <div key={m.id} className="card" style={{marginBottom:10}}>
+                <div style={{display:"flex", justifyContent:"space-between", marginBottom:8}}>
+                  <span style={{fontSize:11, color:"var(--muted)"}}>{fmtDate(m.date)}</span>
+                  {m.result ? <div className="tag tag-green" style={{fontSize:11}}>✓ Done</div> : <div className="tag tag-amber" style={{fontSize:11}}>Scheduled</div>}
+                </div>
+                <div style={{display:"flex", justifyContent:"space-between", alignItems:"center"}}>
+                  <div style={{flex:1}}>
+                    <div style={{display:"flex", alignItems:"center", gap:5, marginBottom:4}}><div style={{width:7, height:7, borderRadius:"50%", background:t1?.color}} /><span style={{fontWeight:700, fontSize:13}}>{t1?.name}</span></div>
+                    {m.result && <div style={{fontFamily:"Bebas Neue", fontSize:20}}>{m.t1Runs}<span style={{fontSize:12, color:"var(--muted)"}}>/{m.t1Balls && fmtOvers(m.t1Balls)} ov</span></div>}
+                  </div>
+                  <div style={{fontFamily:"Bebas Neue", fontSize:14, color:"var(--muted)", padding:"0 8px"}}>VS</div>
+                  <div style={{flex:1, textAlign:"right"}}>
+                    <div style={{display:"flex", alignItems:"center", gap:5, marginBottom:4, justifyContent:"flex-end"}}><span style={{fontWeight:700, fontSize:13}}>{t2?.name}</span><div style={{width:7, height:7, borderRadius:"50%", background:t2?.color}} /></div>
+                    {m.result && <div style={{fontFamily:"Bebas Neue", fontSize:20}}>{m.t2Runs}<span style={{fontSize:12, color:"var(--muted)"}}>/{m.t2Balls && fmtOvers(m.t2Balls)} ov</span></div>}
+                  </div>
+                </div>
+                {winner && <div style={{textAlign:"center", marginTop:8, fontSize:12, color:"var(--green)", fontWeight:700}}>🏆 {winner.name} won</div>}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
