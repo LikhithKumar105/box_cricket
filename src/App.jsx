@@ -299,17 +299,20 @@ export default function GullyScore() {
       }
 
       // 6. Update Bowler Stats
+      // Bowler stats inside applyBall
       const bowler = inn.bowlers[inn.currentBowlerIdx];
       if (bowler) {
         if (isWide || isNoBall) {
           bowler.runs += 1 + (ball.runs || 0);
         } else if (!isBye && !isLegBye) {
-          // Byes and Leg Byes do not count against the bowler's economy
-          bowler.runs += ball.runs;
+          bowler.runs += ball.runs; // Bowler is still charged runs completed on a run-out ball
         }
+        
+        // 🌟 CRITICAL LAW: Bowler does NOT get credit if it's a Run Out or Retired Hurt!
         if (isWicket && !isRetiredHurt && ball.wicketType !== "Run Out") {
           bowler.wickets++;
         }
+        
         if (isLegalDelivery) {
           bowler.balls += 1;
         }
@@ -340,32 +343,31 @@ export default function GullyScore() {
       // Innings Verification Check
       // ── Innings & Match Victory Verification Matrix (Live Evaluation) ──
       // ── Innings & Match Victory Verification Matrix (Safeguarded Edition) ──
+      // ── Innings & Match Victory Verification Matrix (Innings Break Safeguard) ──
       const maxBalls = m.overs * 6;
       const allOut = inn.wickets >= (inn.batsmen.length - 1);
       const oversUp = inn.balls >= maxBalls;
       
       const targetChasedDown = m.currentInnings === 1 && inn.target !== null && inn.runs >= inn.target;
 
-      // 1. If Team 2 successfully chases the target mid-over...
+      // 1. Mid-Over Chase Victory (2nd Innings Target Achieved)
       if (targetChasedDown) {
-        m.needsConfirmation = true; // 🌟 Freeze layout, request validation check
+        m.needsConfirmation = true; 
         m.winner = m.team2;
         m.winMargin = `${(inn.batsmen.length - 1) - inn.wickets} wickets`;
         return m;
       }
 
-      // 2. If overs run out or all-out limits are reached...
+      // 2. Overs Up or All Out reached
       if (allOut || oversUp) {
+        // Flag for validation regardless of whether it's 1st or 2nd innings! 🌟
+        m.needsConfirmation = true; 
+
         if (m.currentInnings === 0) {
-          // 1st Innings over -> Clear to transition to 2nd Innings
-          m.currentInnings = 1;
-          m.innings[1].target = inn.runs + 1;
-          m.needNewBatsmen = true;
-          m.needNewBowler = true;
-          showToast(`Innings over! Target set: ${m.innings[1].target} runs.`);
+          // Temporarily calculate target, but DO NOT transition yet
+          m.winner = "innings_break"; 
         } else {
-          // End of Match Chase -> Freeze layout, request validation check
-          m.needsConfirmation = true; // 🌟 Freeze layout, request validation check
+          // 2nd Innings over -> Calculate final results
           const i1 = m.innings[0];
           const i2 = m.innings[1];
 
@@ -794,6 +796,15 @@ function MatchPage({ liveMatch, teams, getTeam, applyBall, undoLastBall, onFinis
 
   const handleWicket = (wicketType) => {
     setWicketModal(false);
+    
+    // 🌟 PROFESSIONAL RUN OUT MATRIX
+    // If it's a Run Out, detour to the run picker modal so we can log completed runs!
+    if (wicketType === "Run Out") {
+      setExtraRunModal({ type: "run_out" });
+      return;
+    }
+    
+    // Regular dismissals (Bowled, Caught, etc.) get 0 runs automatically
     applyBall({ type: "wicket", runs: 0, wicketType });
   };
 
@@ -972,6 +983,7 @@ function MatchPage({ liveMatch, teams, getTeam, applyBall, undoLastBall, onFinis
 
 
           {/* Main Scoring Controls Panel wrapped with a Confirmation Guard */}
+          {/* Main Scoring Controls Panel wrapped with a Confirmation Guard */}
           {liveMatch.needsConfirmation ? (
             <div style={{
               margin: "16px", 
@@ -981,29 +993,49 @@ function MatchPage({ liveMatch, teams, getTeam, applyBall, undoLastBall, onFinis
               borderRadius: "16px",
               textAlign: "center"
             }}>
-              <div style={{fontSize: 24, marginBottom: 4}}>🏁</div>
+              <div style={{fontSize: 24, marginBottom: 4}}>{liveMatch.winner === "innings_break" ? "🌓" : "🏁"}</div>
               <div style={{fontSize: 18, fontWeight: 800, color: "var(--amber)", marginBottom: 4}}>
-                POTENTIAL MATCH COMPLETION
+                {liveMatch.winner === "innings_break" ? "CONFIRM INNINGS SCORE" : "POTENTIAL MATCH COMPLETION"}
               </div>
+              
               <p style={{fontSize: 13, color: "var(--muted)", marginBottom: 20}}>
-                According to the scoring ledger, <strong>{liveMatch.winner === "tie" ? "The Match is a Tie" : `${getTeam(liveMatch.winner)?.name} has won`}</strong>. Is this correct?
+                {liveMatch.winner === "innings_break" ? (
+                  <>
+                    <strong>{getTeam(inn.team)?.name}</strong> finished their innings at <strong>{inn.runs}/{inn.wickets}</strong> ({fmtOvers(inn.balls)} ov). Target for next innings will be <strong>{inn.runs + 1}</strong>. Is this correct?
+                  </>
+                ) : (
+                  <>
+                    According to the scoring ledger, <strong>{liveMatch.winner === "tie" ? "The Match is a Tie" : `${getTeam(liveMatch.winner)?.name} has won`}</strong>. Is this correct?
+                  </>
+                )}
               </p>
 
               <div style={{display: "flex", flexDirection: "column", gap: 10}}>
-                {/* Action A: Commit result and save permanently */}
+                {/* Action A: Commit result */}
                 <button 
                   className="btn btn-primary" 
                   style={{width: "100%", padding: "14px", fontWeight: 700, borderRadius: 12}}
                   onClick={() => {
                     setLiveMatch(m => {
                       const nm = JSON.parse(JSON.stringify(m));
-                      nm.completed = true; // 🌟 Now cleanly pass to MatchResultPage
                       nm.needsConfirmation = false;
+
+                      if (nm.winner === "innings_break") {
+                        // Cleanly shift to 2nd Innings now that it's confirmed! ✅
+                        nm.currentInnings = 1;
+                        nm.innings[1].target = nm.innings[0].runs + 1;
+                        nm.needNewBatsmen = true;
+                        nm.needNewBowler = true;
+                        nm.winner = null; // reset winner tracker for the chase
+                      } else {
+                        // Final match confirmation
+                        nm.completed = true; 
+                      }
                       return nm;
                     });
                   }}
                 >
-                  ✅ Yes, Confirm Result & Save
+                  {liveMatch.winner === "innings_break" ? "✅ Yes, Start 2nd Innings" : "✅ Yes, Confirm Result & Save"}
                 </button>
 
                 {/* Action B: Rollback last ball if entered by mistake */}
@@ -1020,7 +1052,8 @@ function MatchPage({ liveMatch, teams, getTeam, applyBall, undoLastBall, onFinis
                     undoLastBall();
                     setLiveMatch(m => {
                       const nm = JSON.parse(JSON.stringify(m));
-                      nm.needsConfirmation = false; // Restore active play controls
+                      nm.needsConfirmation = false; 
+                      if (nm.winner === "innings_break") nm.winner = null;
                       return nm;
                     });
                   }}
@@ -1124,34 +1157,45 @@ function MatchPage({ liveMatch, teams, getTeam, applyBall, undoLastBall, onFinis
         </div>
       )}
 
-      {/* Dynamic Extra Sub-Run Selector Modal Overlay */}
+      {/* Updated Dynamic Extra & Run Out Picker Modal */}
       {extraRunModal && (
         <div className="modal-overlay" onClick={() => setExtraRunModal(null)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
             <div className="modal-handle" />
             
             <div style={{fontSize:18, fontWeight:800, marginBottom:4, textTransform:"uppercase", color:"var(--amber)"}}>
-              🎯 {extraRunModal.type.replace("_", " ")} Conceded
+              {extraRunModal.type === "run_out" ? "🏃 Run Out Tracking" : `🎯 ${extraRunModal.type.replace("_", " ")} Conceded`}
             </div>
             <div style={{fontSize:12, color:"var(--muted)", marginBottom:16}}>
-              How many additional runs/boundaries occurred on this delivery?
+              {extraRunModal.type === "run_out" 
+                ? "How many runs were COMPLETELY completed before the run out?" 
+                : "How many additional runs/boundaries occurred on this delivery?"}
             </div>
 
             <div style={{display:"flex", flexDirection:"column", gap:8}}>
               {[0, 1, 2, 3, 4, 5, 6].map(runs => {
                 if (runs === 0 && ["bye", "leg_bye"].includes(extraRunModal.type)) return null;
+                // For a run out, options past 3 runs are extremely rare, but keeping them keeps it flexible!
 
                 let label = `+ ${runs} Runs`;
-                if (runs === 0) label = "Just the Extra (0 additional runs)";
-                if (runs === 4) label = `💥 Boundary (+4 runs)`;
-                if (runs === 6) label = `🚀 Maximum (+6 runs)`;
+                if (runs === 0) label = extraRunModal.type === "run_out" ? "🏃 0 runs completed (Run out on the 1st run)" : "Just the Extra (0 additional runs)";
+                if (runs === 1) label = extraRunModal.type === "run_out" ? "🏃 1 run completed (Run out on the 2nd run)" : "+ 1 Run";
+                if (runs === 2) label = extraRunModal.type === "run_out" ? "🏃 2 runs completed (Run out on the 3rd run)" : "+ 2 Runs";
 
                 return (
                   <button 
                     key={runs} 
                     className="btn btn-secondary" 
                     style={{width:"100%", textAlign:"left", padding:"12px 16px", fontWeight: 700}} 
-                    onClick={() => submitCombinedExtra(runs)}
+                    onClick={() => {
+                      if (extraRunModal.type === "run_out") {
+                        // Pass as a wicket with the completed runs attached! 🌟
+                        applyBall({ type: "wicket", runs: runs, wicketType: "Run Out" });
+                        setExtraRunModal(null);
+                      } else {
+                        submitCombinedExtra(runs);
+                      }
+                    }}
                   >
                     {label}
                   </button>
