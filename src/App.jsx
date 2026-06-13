@@ -1545,6 +1545,7 @@ const generateScorecardImage = async (match, getTeam) => {
   ctx.fillText(match.winner === "tie" ? "🏆 MATCH TIED! BOTH TEAMS LEVEL" : `🏆 ${winTeamName.toUpperCase()} WON BY ${match.winMargin.toUpperCase()}`, canvas.width / 2, 62);
 
   // Helper macro function to draw side-by-side tables
+  // Helper macro function to loop and draw independent side-by-side team boards on the shared canvas texture
   const drawTeamInningsColumn = (inn, teamName, startX) => {
     ctx.textAlign = "left";
     ctx.fillStyle = "#ffffff";
@@ -1561,6 +1562,7 @@ const generateScorecardImage = async (match, getTeam) => {
     ctx.font = "bold 12px sans-serif";
     ctx.fillText(`${teamName.toUpperCase()} INNINGS`, startX + 20, 192);
 
+    // BATTING SECTION SUB-HEAD
     ctx.fillStyle = "#8f8fbf";
     ctx.font = "bold 12px sans-serif";
     ctx.fillText("BATTING", startX + 20, 235);
@@ -1568,6 +1570,7 @@ const generateScorecardImage = async (match, getTeam) => {
     ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(startX + 20, 245); ctx.lineTo(startX + 490, 245); ctx.stroke();
 
+    // Table Column Labels Header Row
     ctx.font = "bold 11px sans-serif";
     ctx.fillText("Batsman", startX + 20, 265);
     ctx.textAlign = "right";
@@ -1580,16 +1583,20 @@ const generateScorecardImage = async (match, getTeam) => {
     let currentY = 295;
     const activeBatters = inn.batsmen.filter(b => b.balls > 0 || b.outDesc);
 
-    activeBatters.forEach(b => {
+    // QA PROTECTION: Limit to max 11 players to keep the dark container box completely clean
+    activeBatters.slice(0, 11).forEach(b => {
       ctx.textAlign = "left";
       ctx.fillStyle = b.outDesc ? "#8f8fbf" : "#ffffff";
       ctx.font = "bold 14px sans-serif";
-      ctx.fillText(b.name, startX + 20, currentY);
+      
+      // Smart String Truncate: Keeps text from overflowing into the run column if names are too long
+      const displayName = b.name.length > 18 ? b.name.substring(0, 16) + ".." : b.name;
+      ctx.fillText(displayName, startX + 20, currentY);
 
       if (b.outDesc) {
         ctx.fillStyle = "#8f8fbf";
         ctx.font = "normal 11px sans-serif";
-        ctx.fillText(` (${b.outDesc})`, startX + 20 + ctx.measureText(b.name).width, currentY);
+        ctx.fillText(` (${b.outDesc})`, startX + 20 + ctx.measureText(displayName).width, currentY);
       }
 
       ctx.textAlign = "right";
@@ -1607,29 +1614,33 @@ const generateScorecardImage = async (match, getTeam) => {
       ctx.font = "bold 13px sans-serif";
       ctx.fillText(calcSR(b.runs, b.balls), startX + 490, currentY);
 
+      // Light dividing line
       ctx.strokeStyle = "rgba(255,255,255,0.03)";
       ctx.beginPath(); ctx.moveTo(startX + 20, currentY + 10); ctx.lineTo(startX + 490, currentY + 10); ctx.stroke();
       
-      currentY += 32;
+      currentY += 28; // Optimized slightly more compact height padding row step
     });
 
+    // Extras Line Output Row
     const totalExtras = Object.values(inn.extras).reduce((a, b) => a + b, 0);
     ctx.textAlign = "left";
     ctx.fillStyle = "#8f8fbf";
     ctx.font = "13px sans-serif";
-    ctx.fillText(`Extras: ${totalExtras} (W ${inn.extras.wide}, NB ${inn.extras.noBall}, B ${inn.extras.bye}, LB ${inn.extras.legBye})`, startX + 20, currentY + 15);
+    ctx.fillText(`Extras: ${totalExtras} (W ${inn.extras.wide}, NB ${inn.extras.noBall}, B ${inn.extras.bye}, LB ${inn.extras.legBye})`, startX + 20, currentY + 10);
 
+    // Total Row
     ctx.strokeStyle = "rgba(255,255,255,0.08)";
-    ctx.beginPath(); ctx.moveTo(startX + 20, currentY + 30); ctx.lineTo(startX + 490, currentY + 30); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(startX + 20, currentY + 22); ctx.lineTo(startX + 490, currentY + 22); ctx.stroke();
     
     ctx.fillStyle = "#ffffff";
-    ctx.font = "bold 15px sans-serif";
-    ctx.fillText("Total", startX + 20, currentY + 52);
+    ctx.font = "bold 14px sans-serif";
+    ctx.fillText("Total", startX + 20, currentY + 42);
     ctx.textAlign = "right";
-    ctx.font = "bold 16px sans-serif";
-    ctx.fillText(`${inn.runs}/${inn.wickets} (${fmtOversLocal(inn.balls)} ov)`, startX + 490, currentY + 52);
+    ctx.font = "bold 15px sans-serif";
+    ctx.fillText(`${inn.runs}/${inn.wickets} (${fmtOversLocal(inn.balls)} ov)`, startX + 490, currentY + 42);
 
-    let bowlY = currentY + 100;
+    // 🌟 THE FIX: Anchor bowling table to a fixed layout baseline lower on the card profile 
+    let bowlY = 620; 
     ctx.textAlign = "left";
     ctx.fillStyle = "#8f8fbf";
     ctx.font = "bold 12px sans-serif";
@@ -1637,6 +1648,7 @@ const generateScorecardImage = async (match, getTeam) => {
     ctx.strokeStyle = "rgba(255,255,255,0.08)";
     ctx.beginPath(); ctx.moveTo(startX + 20, bowlY + 10); ctx.lineTo(startX + 490, bowlY + 10); ctx.stroke();
 
+    // Table Column Bowling Header Labels Row
     ctx.font = "bold 11px sans-serif";
     ctx.fillText("Bowler", startX + 20, bowlY + 30);
     ctx.textAlign = "right";
@@ -1647,13 +1659,13 @@ const generateScorecardImage = async (match, getTeam) => {
     ctx.fillText("Econ", startX + 490, bowlY + 30);
 
     let activeBowlers = inn.bowlers.filter(b => b.balls > 0);
-    bowlY += 58;
+    bowlY += 55;
 
     activeBowlers.forEach(b => {
       ctx.textAlign = "left";
       ctx.fillStyle = "#ffffff";
       ctx.font = "bold 14px sans-serif";
-      ctx.fillText(b.name, startX + 20, bowlY);
+      ctx.fillText(b.name.length > 18 ? b.name.substring(0, 16) + ".." : b.name, startX + 20, bowlY);
 
       ctx.textAlign = "right";
       ctx.fillStyle = "#b5b5d6";
@@ -1673,7 +1685,7 @@ const generateScorecardImage = async (match, getTeam) => {
       ctx.strokeStyle = "rgba(255,255,255,0.03)";
       ctx.beginPath(); ctx.moveTo(startX + 20, bowlY + 10); ctx.lineTo(startX + 490, bowlY + 10); ctx.stroke();
 
-      bowlY += 32;
+      bowlY += 28;
     });
   };
 
