@@ -1506,10 +1506,8 @@ function InlineScorecardView({ match, getTeam }) {
   );
 }
 
-// ─── SAFE HIGH-ACTIVATION DUAL-TEAM SCORECARD IMAGE GENERATION ENGINE ──────────
+// ─── CRICHEROES COMPLETE MULTI-INNINGS SCORECARD EXPORT SHEET ENGINE ──────────
 const generateScorecardImage = async (match, getTeam) => {
-  const i1 = match.innings[0];
-  const i2 = match.innings[1];
   const t1Name = getTeam(match.team1)?.name || "Team 1";
   const t2Name = getTeam(match.team2)?.name || "Team 2";
   const winTeamName = getTeam(match.winner)?.name || "Tournament Team";
@@ -1518,218 +1516,162 @@ const generateScorecardImage = async (match, getTeam) => {
   const calcSR = (runs, balls) => balls > 0 ? ((runs / balls) * 100).toFixed(0) : "0";
   const calcEcon = (runs, balls) => balls > 0 ? ((runs / (balls / 6))).toFixed(1) : "0.0";
 
-  // 1. Setup Canvas dimensions
-  const canvas = document.createElement("canvas");
-  const ctx = canvas.getContext("2d");
-  canvas.width = 1100; 
-  canvas.height = 950; 
-
-  // 2. Base Canvas Background Paint (Sleek Dark Theme)
-  ctx.fillStyle = "#0d0d16";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-  ctx.fillStyle = "#151522";
-  ctx.fillRect(25, 115, 510, 750); 
-  ctx.fillRect(565, 115, 510, 750); 
-
-  // 3. Match Header Banner
-  ctx.fillStyle = match.winner === "tie" ? "rgba(255, 165, 0, 0.08)" : "rgba(0, 212, 106, 0.08)";
-  ctx.fillRect(25, 25, canvas.width - 50, 60);
-  ctx.strokeStyle = match.winner === "tie" ? "rgba(255, 165, 0, 0.3)" : "rgba(0, 212, 106, 0.3)";
-  ctx.lineWidth = 2;
-  ctx.strokeRect(25, 25, canvas.width - 50, 60);
-
-  ctx.textAlign = "center";
-  ctx.fillStyle = match.winner === "tie" ? "#FFA500" : "#00D46A";
-  ctx.font = "bold 22px sans-serif";
-  ctx.fillText(match.winner === "tie" ? "🏆 MATCH TIED! BOTH TEAMS LEVEL" : `🏆 ${winTeamName.toUpperCase()} WON BY ${match.winMargin.toUpperCase()}`, canvas.width / 2, 62);
-
-  // Helper macro function to draw side-by-side tables
-  // Helper macro function to loop and draw independent side-by-side team boards on the shared canvas texture
-  const drawTeamInningsColumn = (inn, teamName, startX) => {
-    ctx.textAlign = "left";
-    ctx.fillStyle = "#ffffff";
-    ctx.font = "bold 34px sans-serif";
-    ctx.fillText(`${inn.runs}/${inn.wickets}`, startX + 20, 165);
-
-    ctx.textAlign = "right";
-    ctx.fillStyle = "#8f8fbf";
-    ctx.font = "14px sans-serif";
-    ctx.fillText(`${fmtOversLocal(inn.balls)} overs · RR ${(inn.runs / (inn.balls / 6 || 1) * 6).toFixed(2)}`, startX + 490, 162);
-
-    ctx.textAlign = "left";
-    ctx.fillStyle = "#00D46A";
-    ctx.font = "bold 12px sans-serif";
-    ctx.fillText(`${teamName.toUpperCase()} INNINGS`, startX + 20, 192);
-
-    // BATTING SECTION SUB-HEAD
-    ctx.fillStyle = "#8f8fbf";
-    ctx.font = "bold 12px sans-serif";
-    ctx.fillText("BATTING", startX + 20, 235);
-    ctx.strokeStyle = "rgba(255,255,255,0.08)";
-    ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(startX + 20, 245); ctx.lineTo(startX + 490, 245); ctx.stroke();
-
-    // Table Column Labels Header Row
-    ctx.font = "bold 11px sans-serif";
-    ctx.fillText("Batsman", startX + 20, 265);
-    ctx.textAlign = "right";
-    ctx.fillText("R", startX + 310);
-    ctx.fillText("B", startX + 355);
-    ctx.fillText("4s", startX + 400);
-    ctx.fillText("6s", startX + 445);
-    ctx.fillText("SR", startX + 490);
-
-    let currentY = 295;
+  // Build individual innings templates dynamically based on match state
+  const renderInningsHTML = (inn, teamName) => {
     const activeBatters = inn.batsmen.filter(b => b.balls > 0 || b.outDesc);
-
-    // QA PROTECTION: Limit to max 11 players to keep the dark container box completely clean
-    activeBatters.slice(0, 11).forEach(b => {
-      ctx.textAlign = "left";
-      ctx.fillStyle = b.outDesc ? "#8f8fbf" : "#ffffff";
-      ctx.font = "bold 14px sans-serif";
-      
-      // Smart String Truncate: Keeps text from overflowing into the run column if names are too long
-      const displayName = b.name.length > 18 ? b.name.substring(0, 16) + ".." : b.name;
-      ctx.fillText(displayName, startX + 20, currentY);
-
-      if (b.outDesc) {
-        ctx.fillStyle = "#8f8fbf";
-        ctx.font = "normal 11px sans-serif";
-        ctx.fillText(` (${b.outDesc})`, startX + 20 + ctx.measureText(displayName).width, currentY);
-      }
-
-      ctx.textAlign = "right";
-      ctx.fillStyle = "#ffffff";
-      ctx.font = "bold 14px sans-serif";
-      ctx.fillText(b.runs, startX + 310, currentY);
-      
-      ctx.fillStyle = "#b5b5d6";
-      ctx.font = "normal 13px sans-serif";
-      ctx.fillText(b.balls, startX + 355, currentY);
-      ctx.fillText(b.fours, startX + 400, currentY);
-      ctx.fillText(b.sixes, startX + 445, currentY);
-      
-      ctx.fillStyle = "#b5b5d6";
-      ctx.font = "bold 13px sans-serif";
-      ctx.fillText(calcSR(b.runs, b.balls), startX + 490, currentY);
-
-      // Light dividing line
-      ctx.strokeStyle = "rgba(255,255,255,0.03)";
-      ctx.beginPath(); ctx.moveTo(startX + 20, currentY + 10); ctx.lineTo(startX + 490, currentY + 10); ctx.stroke();
-      
-      currentY += 28; // Optimized slightly more compact height padding row step
-    });
-
-    // Extras Line Output Row
+    const activeBowlers = inn.bowlers.filter(b => b.balls > 0);
     const totalExtras = Object.values(inn.extras).reduce((a, b) => a + b, 0);
-    ctx.textAlign = "left";
-    ctx.fillStyle = "#8f8fbf";
-    ctx.font = "13px sans-serif";
-    ctx.fillText(`Extras: ${totalExtras} (W ${inn.extras.wide}, NB ${inn.extras.noBall}, B ${inn.extras.bye}, LB ${inn.extras.legBye})`, startX + 20, currentY + 10);
 
-    // Total Row
-    ctx.strokeStyle = "rgba(255,255,255,0.08)";
-    ctx.beginPath(); ctx.moveTo(startX + 20, currentY + 22); ctx.lineTo(startX + 490, currentY + 22); ctx.stroke();
-    
-    ctx.fillStyle = "#ffffff";
-    ctx.font = "bold 14px sans-serif";
-    ctx.fillText("Total", startX + 20, currentY + 42);
-    ctx.textAlign = "right";
-    ctx.font = "bold 15px sans-serif";
-    ctx.fillText(`${inn.runs}/${inn.wickets} (${fmtOversLocal(inn.balls)} ov)`, startX + 490, currentY + 42);
+    return `
+      <div class="innings-section">
+        <div class="team-header-row">
+          <div class="score-display">${inn.runs}/${inn.wickets}</div>
+          <div class="overs-display">${fmtOversLocal(inn.balls)} overs · RR ${(inn.runs / (inn.balls / 6 || 1) * 6).toFixed(2)}</div>
+        </div>
+        <div class="team-title-sub">${teamName.toUpperCase()} INNINGS</div>
 
-    // 🌟 THE FIX: Anchor bowling table to a fixed layout baseline lower on the card profile 
-    let bowlY = 620; 
-    ctx.textAlign = "left";
-    ctx.fillStyle = "#8f8fbf";
-    ctx.font = "bold 12px sans-serif";
-    ctx.fillText("BOWLING", startX + 20, bowlY);
-    ctx.strokeStyle = "rgba(255,255,255,0.08)";
-    ctx.beginPath(); ctx.moveTo(startX + 20, bowlY + 10); ctx.lineTo(startX + 490, bowlY + 10); ctx.stroke();
+        <div class="table-title">BATTING</div>
+        <table class="scorecard-table">
+          <thead>
+            <tr>
+              <th style="text-align: left;">Batsman</th>
+              <th>R</th>
+              <th>B</th>
+              <th>4s</th>
+              <th>6s</th>
+              <th>SR</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${activeBatters.map(b => {
+              const dismissal = b.outDesc ? `(${b.outDesc})` : '';
+              return `
+                <tr>
+                  <td style="text-align: left; font-weight: ${b.outDesc ? 'normal' : 'bold'}; color: ${b.outDesc ? '#8f8fbf' : '#ffffff'};">
+                    ${b.name} <span class="dismissal-text">${dismissal}</span>
+                  </td>
+                  <td style="font-weight: bold; color: #ffffff;">${b.runs}</td>
+                  <td>${b.balls}</td>
+                  <td>${b.fours}</td>
+                  <td>${b.sixes}</td>
+                  <td style="font-weight: bold;">${calcSR(b.runs, b.balls)}</td>
+                </tr>
+              `;
+            }).join('')}
+            <tr class="extras-row">
+              <td colspan="6" style="text-align: left; color: #8f8fbf; font-size: 13px; padding: 12px 6px;">
+                Extras: ${totalExtras} (W ${inn.extras.wide}, NB ${inn.extras.noBall}, B ${inn.extras.bye}, LB ${inn.extras.legBye})
+              </td>
+            </tr>
+            <tr class="total-row">
+              <td style="text-align: left; font-weight: bold; color: #ffffff;">Total</td>
+              <td colspan="5" style="text-align: right; font-weight: bold; color: #ffffff; font-size: 16px;">
+                ${inn.runs}/${inn.wickets} (${fmtOversLocal(inn.balls)} ov)
+              </td>
+            </tr>
+          </tbody>
+        </table>
 
-    // Table Column Bowling Header Labels Row
-    ctx.font = "bold 11px sans-serif";
-    ctx.fillText("Bowler", startX + 20, bowlY + 30);
-    ctx.textAlign = "right";
-    ctx.fillText("O", startX + 310, bowlY + 30);
-    ctx.fillText("M", startX + 355, bowlY + 30);
-    ctx.fillText("R", startX + 400, bowlY + 30);
-    ctx.fillText("W", startX + 445, bowlY + 30);
-    ctx.fillText("Econ", startX + 490, bowlY + 30);
-
-    let activeBowlers = inn.bowlers.filter(b => b.balls > 0);
-    bowlY += 55;
-
-    activeBowlers.forEach(b => {
-      ctx.textAlign = "left";
-      ctx.fillStyle = "#ffffff";
-      ctx.font = "bold 14px sans-serif";
-      ctx.fillText(b.name.length > 18 ? b.name.substring(0, 16) + ".." : b.name, startX + 20, bowlY);
-
-      ctx.textAlign = "right";
-      ctx.fillStyle = "#b5b5d6";
-      ctx.font = "normal 13px sans-serif";
-      ctx.fillText(fmtOversLocal(b.balls), startX + 310, bowlY);
-      ctx.fillText("0", startX + 355, bowlY); 
-      ctx.fillText(b.runs, startX + 400, bowlY);
-      
-      ctx.fillStyle = "#00D46A";
-      ctx.font = "bold 14px sans-serif";
-      ctx.fillText(b.wickets, startX + 445, bowlY);
-      
-      ctx.fillStyle = "#b5b5d6";
-      ctx.font = "bold 13px sans-serif";
-      ctx.fillText(calcEcon(b.runs, b.balls), startX + 490, bowlY);
-
-      ctx.strokeStyle = "rgba(255,255,255,0.03)";
-      ctx.beginPath(); ctx.moveTo(startX + 20, bowlY + 10); ctx.lineTo(startX + 490, bowlY + 10); ctx.stroke();
-
-      bowlY += 28;
-    });
+        <div class="table-title" style="margin-top: 24px;">BOWLING</div>
+        <table class="scorecard-table">
+          <thead>
+            <tr>
+              <th style="text-align: left;">Bowler</th>
+              <th>O</th>
+              <th>M</th>
+              <th>R</th>
+              <th>W</th>
+              <th>Econ</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${activeBowlers.map(b => `
+              <tr>
+                <td style="text-align: left; font-weight: bold; color: #ffffff;">${b.name}</td>
+                <td>${fmtOversLocal(b.balls)}</td>
+                <td>0</td>
+                <td>${b.runs}</td>
+                <td style="font-weight: bold; color: #00D46A;">${b.wickets}</td>
+                <td style="font-weight: bold;">${calcEcon(b.runs, b.balls)}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
   };
 
-  drawTeamInningsColumn(i1, t1Name, 25);
-  drawTeamInningsColumn(i2, t2Name, 565);
+  // Compile full structural HTML document payload mirroring the provided screenshot layout
+  const htmlPayload = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Official Match Scorecard - ${t1Name} vs ${t2Name}</title>
+      <style>
+        :root { --green: #00D46A; --amber: #FFA500; --bg: #0d0d16; --card-bg: #151522; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; background-color: var(--bg); color: #ffffff; margin: 0; padding: 16px; }
+        .wrapper { max-width: 600px; margin: 0 auto; background-color: #0d0d16; padding-bottom: 40px; }
+        .banner { border: 1px solid rgba(0, 212, 106, 0.3); background: rgba(0, 212, 106, 0.06); border-radius: 8px; padding: 12px; text-align: center; font-weight: bold; color: var(--green); font-size: 15px; margin-bottom: 24px; }
+        .banner-tie { border: 1px solid rgba(255, 165, 0, 0.3); background: rgba(255, 165, 0, 0.06); color: var(--amber); }
+        .innings-section { background-color: var(--card-bg); border-radius: 12px; padding: 16px; margin-bottom: 24px; box-shadow: 0 4px 12px rgba(0,0,0,0.2); }
+        .team-header-row { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 2px; }
+        .score-display { font-size: 38px; font-weight: bold; color: #ffffff; letter-spacing: -0.5px; }
+        .overs-display { font-size: 14px; color: #8f8fbf; }
+        .team-title-sub { font-size: 12px; color: var(--green); font-weight: 800; letter-spacing: 1px; margin-bottom: 20px; }
+        .table-title { font-size: 12px; font-weight: bold; color: #8f8fbf; letter-spacing: 1px; border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 6px; margin-bottom: 8px; }
+        .scorecard-table { width: 100%; border-collapse: collapse; margin-bottom: 12px; }
+        .scorecard-table th { font-size: 11px; color: #8f8fbf; padding: 8px 4px; text-align: right; text-transform: uppercase; }
+        .scorecard-table td { font-size: 14px; color: #b5b5d6; padding: 10px 4px; text-align: right; border-bottom: 1px solid rgba(255,255,255,0.03); }
+        .dismissal-text { font-size: 12px; color: #8f8fbf; font-weight: normal; margin-left: 4px; }
+        .extras-row td, .total-row td { border-bottom: none; }
+        .total-row { border-top: 1px solid rgba(255,255,255,0.08); }
+        .footer-watermark { text-align: center; margin-top: 32px; font-size: 11px; color: rgba(255,255,255,0.2); letter-spacing: 0.5px; }
+      </style>
+    </head>
+    <body>
+      <div class="wrapper">
+        <div class="banner ${match.winner === 'tie' ? 'banner-tie' : ''}">
+          🏆 ${match.winner === 'tie' ? '💥 MATCH TIED! BOTH TEAMS LEVEL' : `${winTeamName.toUpperCase()} WON BY ${match.winMargin}`}
+        </div>
+        
+        ${renderInningsHTML(match.innings[0], t1Name)}
+        ${renderInningsHTML(match.innings[1], t2Name)}
 
-  ctx.strokeStyle = "rgba(255,255,255,0.08)";
-  ctx.beginPath(); ctx.moveTo(25, 895); ctx.lineTo(canvas.width - 25, 895); ctx.stroke();
+        <div class="footer-watermark">
+          ⚡ CRICHEROES EMULATED LIVE DUAL-LEDGER<br>
+          Scored via Box Cricket Scoring Engine
+        </div>
+      </div>
+    </body>
+    </html>
+  `;
 
-  ctx.textAlign = "center";
-  ctx.fillStyle = "rgba(255,255,255,0.25)";
-  ctx.font = "12px sans-serif";
-  ctx.fillText("Scored cleanly via Box Cricket Scoring App Engine", canvas.width / 2, 920);
+  // 2. Wrap HTML data stream into a shareable Blob artifact document
+  const blob = new Blob([htmlPayload], { type: "text/html" });
+  const file = new File([blob], `Scorecard_Match_${match.id}.html`, { type: "text/html" });
 
-  // ⚡ 5. THE CRITICAL SECURITY SOLUTION: EXTRACT TO DATA-URL INSTANTLY
-  try {
-    const dataUrl = canvas.toDataURL("image/png");
-    
-    // Convert base64 stream to data structure directly inside the click transaction frame
-    const res = await fetch(dataUrl);
-    const blob = await res.blob();
-    const file = new File([blob], `Scorecard_${match.id}.png`, { type: "image/png" });
-
-    // Execute instant share sheet activation
-    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+  // ROUTE OPTION A: Native sharing pipeline activation
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try {
       await navigator.share({
         files: [file],
-        title: `Match Card: ${t1Name} vs ${t2Name}`,
-        text: `Check out the complete box cricket match scorecard ledger!`
+        title: `Complete Scorecard: ${t1Name} vs ${t2Name}`,
+        text: `Open this scorecard file to view the complete dual-innings ball-by-ball performance reports for ${t1Name} vs ${t2Name}!`
       });
-    } else {
-      throw new Error("Device native share protocols unavailable.");
+    } catch (err) {
+      if (err.name !== "AbortError") console.error("Sharing sequence rejected:", err);
     }
-  } catch (err) {
-    // 🛡️ Automatic Fallback: Instantly download file if share policy intercept hits
-    canvas.toBlob((blob) => {
-      if (!blob) return;
-      const link = document.createElement("a");
-      link.href = URL.createObjectURL(blob);
-      link.download = `Complete_Scorecard_${match.id}.png`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-    }, "image/png");
+  } else {
+    // ROUTE OPTION B: Fallback explicit download routing
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `Complete_Scorecard_Match_${match.id}.html`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    alert("📲 Complete dual-team scorecard document saved directly to your downloads gallery! You can now send this file straight into any WhatsApp group.");
   }
 };
 
