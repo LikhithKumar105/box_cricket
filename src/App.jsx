@@ -222,31 +222,23 @@ export default function GullyScore() {
 
   const getTeam = (id) => teams.find(t => t.id === id);
 
-  // ── Scoring engine ──────────────────────────────────────────────────────────
-  // ── Scoring engine (Professional Umpire Master Matrix) ────────────────────
+
+  // ── Restore Scoring Engine (Stable Version) ──────────────────────────────
   const applyBall = useCallback((ball) => {
     setLiveMatch(prev => {
       if (!prev) return prev;
       const m = JSON.parse(JSON.stringify(prev));
       const inn = m.innings[m.currentInnings];
       
-      // 1. Identify critical tracking parameters cleanly (Supports Run Out on Extras!)
-      const isWide        = ball.type === "wide";
-      const isNoBall      = ball.type === "no_ball";
-      const isBye         = ball.type === "bye";
-      const isLegBye      = ball.type === "leg_bye";
-      
-      // A ball is a wicket if explicit type is "wicket" OR if it's a Run Out on an Extra delivery
-      const isWicket      = ball.type === "wicket" || ball.wicketType === "Run Out";
-      const isRetiredHurt = isWicket && (ball.wicketType === "Retired" || ball.wicketType === "Retired Hurt");
+      const isWide = ball.type === "wide";
+      const isNoBall = ball.type === "no_ball";
+      const isWicket = ball.type === "wicket" || ball.wicketType === "Run Out";
+      const isBye = ball.type === "bye";
+      const isLegBye = ball.type === "leg_bye";
+      const isRunOut = ball.wicketType === "Run Out";
+      const isRetiredHurt = isWicket && ball.wicketType === "Retired";
 
-      // 🚨 LAW OVERRIDE: FREE HIT DISMISSAL SAFETY CHECK
-      if (m.freeHit && isWicket && !isRetiredHurt && ball.wicketType !== "Run Out") {
-        showToast(`⚠️ Umpire Check: Batsman cannot be dismissed "${ball.wicketType}" on a Free Hit!`);
-        return prev; // Block calculation completely
-      }
-
-      // 2. Snapshot tracking indices before modification
+      // 1. Track exact crease roles before any mutations
       if (!inn.historyStrikerIdx) inn.historyStrikerIdx = [];
       if (!inn.historyNonStrikerIdx) inn.historyNonStrikerIdx = [];
       if (!inn.historyBowlerIdx) inn.historyBowlerIdx = [];
@@ -255,22 +247,41 @@ export default function GullyScore() {
       inn.historyNonStrikerIdx.push(inn.nonStrikerIdx);
       inn.historyBowlerIdx.push(inn.currentBowlerIdx);
 
-      const entry = { ...ball, overNum: Math.floor(inn.balls / 6), ballNum: inn.balls % 6, freeHitBeforeThisBall: m.freeHit || false };
+      const entry = { ...ball, overNum: Math.floor(inn.balls / 6), ballNum: inn.balls % 6 };
       inn.ballHistory.push(entry);
 
-      // A delivery is legal ONLY if it isn't wide, a no ball, or a tactical retired hurt
       const isLegalDelivery = !isWide && !isNoBall && !isRetiredHurt;
 
-      // 3. Process Runs and Extras securely
+      // 2. Process Team Runs and Extras securely
       let deliveryRuns = ball.runs || 0;
-      if (isWide || isNoBall) {
+      if (isWide) {
         inn.runs += 1 + deliveryRuns;
-        if (isWide) inn.extras.wide += 1 + deliveryRuns;
-        if (isNoBall) inn.extras.noBall += 1 + deliveryRuns;
+        inn.extras.wide += 1 + deliveryRuns;
+      } else if (isNoBall) {
+        inn.runs += 1 + deliveryRuns;
+        inn.extras.noBall += 1 + deliveryRuns;
       } else {
         inn.runs += deliveryRuns;
         if (isBye) inn.extras.bye += deliveryRuns;
         if (isLegBye) inn.extras.legBye += deliveryRuns;
+      }
+
+      // 3. Update Facing Batsman Personal Stats Profile
+      if (!isRetiredHurt) {
+        const batter = inn.batsmen[inn.strikerIdx];
+        if (batter) {
+          if (!isWicket && !isWide && !isBye && !isLegBye) {
+            batter.runs += deliveryRuns;
+          } else if (isRunOut && !isWide) {
+            batter.runs += deliveryRuns;
+          }
+          
+          if (!isWide) {
+            batter.balls += 1;
+          }
+          if (!isWide && !isBye && !isLegBye && deliveryRuns === 4) batter.fours++;
+          if (!isWide && !isBye && !isLegBye && deliveryRuns === 6) batter.sixes++;
+        }
       }
 
       // 4. Handle Dismissal States vs Tactical Retired Hurt
@@ -278,48 +289,23 @@ export default function GullyScore() {
         if (isRetiredHurt) {
           inn.batsmen[inn.strikerIdx].out = false;
           inn.batsmen[inn.strikerIdx].outDesc = "Retired Hurt";
-          inn.runOutVictimCreaseSlot = null;
-          inn.runOutStrikeIntent = null;
-        } else if (ball.wicketType === "Run Out") {
+        } else if (isRunOut) {
           const victimIdx = ball.dismissedPosition === "non_striker" ? inn.nonStrikerIdx : inn.strikerIdx;
           inn.wickets += 1;
           inn.batsmen[victimIdx].out = true;
           inn.batsmen[victimIdx].outDesc = "Run Out";
           
-          // Secure layout configuration targets for the bench selectors step down the pipeline loop
           inn.runOutVictimCreaseSlot = ball.dismissedPosition === "non_striker" ? "non_striker" : "striker";
-          inn.runOutStrikeIntent = ball.nextFacingIntent; // ✅ Stores "new_batsman" or "surviving_batsman"
+          inn.runOutStrikeIntent = ball.nextFacingIntent;
         } else {
           inn.wickets += 1;
           inn.batsmen[inn.strikerIdx].out = true;
           inn.batsmen[inn.strikerIdx].outDesc = ball.wicketType || "out";
-          inn.runOutVictimCreaseSlot = null;
-          inn.runOutStrikeIntent = null;
         }
         m.needNewBatsmen = true; 
       }
 
-      // 5. Update Batsman Stats (Runs and Balls Faced)
-      if (!isRetiredHurt) {
-        const batter = inn.batsmen[inn.strikerIdx];
-        if (batter) {
-          if (!isWicket && !isWide && !isBye && !isLegBye) {
-            // Safe assignment: adds 0 runs if it's a bare No Ball
-            batter.runs += deliveryRuns; 
-          } else if (ball.wicketType === "Run Out" && !isWide) {
-            batter.runs += deliveryRuns;
-          }
-          
-          if (!isWide) {
-            // ✅ CRITICAL PROTECTION: No Balls with 0 runs safely increment balls faced here
-            batter.balls += 1; 
-          }
-          if (!isWide && !isBye && !isLegBye && deliveryRuns === 4) batter.fours++;
-          if (!isWide && !isBye && !isLegBye && deliveryRuns === 6) batter.sixes++;
-        }
-      }
-
-      // 6. Update Bowler Stats (With Bye/LegBye Protections)
+      // 5. Update Bowler Stats
       const bowler = inn.bowlers[inn.currentBowlerIdx];
       if (bowler) {
         if (isWide || isNoBall) {
@@ -327,29 +313,20 @@ export default function GullyScore() {
         } else if (!isBye && !isLegBye) {
           bowler.runs += deliveryRuns;
         }
-        
         if (isWicket && !isRetiredHurt && ball.wicketType !== "Run Out") {
           bowler.wickets++;
         }
-        
         if (isLegalDelivery) {
           bowler.balls += 1;
         }
       }
 
-      // 7. Universal Strike Rotation Mechanics (Skip on standard wickets)
-      if (!isWicket && deliveryRuns % 2 !== 0) {
+      // 6. Universal Strike Rotation Mechanics
+      if ((!isWicket || isRunOut) && deliveryRuns % 2 !== 0) {
         [inn.strikerIdx, inn.nonStrikerIdx] = [inn.nonStrikerIdx, inn.strikerIdx];
       }
 
-      // 8. Manage Free Hit State Machine
-      if (isNoBall) {
-        m.freeHit = true; 
-      } else if (isLegalDelivery) {
-        m.freeHit = false; // Consumed on any legal delivery
-      }
-
-      // 9. Over Boundary Transitions (Triggered ONLY on legal deliveries)
+      // 7. Over Boundary Transitions
       if (isLegalDelivery && inn.balls + 1 <= m.overs * 6) {
         if ((inn.balls + 1) % 6 === 0) {
           if (!isWicket) {
@@ -359,12 +336,11 @@ export default function GullyScore() {
         }
       }
 
-      // Advance ball count field if valid
       if (isLegalDelivery) {
         inn.balls += 1;
       }
 
-      // 10. Innings & Match Victory Verification Matrix
+      // 8. Innings Verification & Victory State Machine
       const maxBalls = m.overs * 6;
       const allOut = inn.wickets >= (inn.batsmen.length - 1);
       const oversUp = inn.balls >= maxBalls;
@@ -381,6 +357,7 @@ export default function GullyScore() {
         m.needsConfirmation = true; 
         if (m.currentInnings === 0) {
           m.winner = "innings_break"; 
+          m.freeHit = false; // ✅ QA PATCH: Explicitly clears Free Hit parameters before Innings 2 starts!
         } else {
           const i1 = m.innings[0];
           const i2 = m.innings[1];
@@ -400,7 +377,6 @@ export default function GullyScore() {
     });
   }, [getTeam, showToast]);
 
-  // ─── Patched Undo Scoring Engine ───────────────────────────────────────
   const undoLastBall = useCallback(() => {
     setLiveMatch(prev => {
       if (!prev) return prev;
@@ -411,14 +387,11 @@ export default function GullyScore() {
       const last = inn.ballHistory.pop();
       const isWide = last.type === "wide";
       const isNoBall = last.type === "no_ball";
-      const isWicket = last.type === "wicket";
+      const isWicket = last.type === "wicket" || last.wicketType === "Run Out";
       const isBye = last.type === "bye";
       const isLegBye = last.type === "leg_bye";
-      const isRunOut = isWicket && last.wicketType === "Run Out";
-      const isRetiredHurt = isWicket && (last.wicketType === "Retired" || last.wicketType === "Retired Hurt");
-
-      // Restore historical Free Hit parameters safely
-      m.freeHit = last.freeHitBeforeThisBall || false;
+      const isRunOut = last.wicketType === "Run Out";
+      const isRetiredHurt = isWicket && last.wicketType === "Retired";
 
       // 1. Revert team totals and extras configurations
       let deliveryRuns = last.runs || 0;
@@ -440,42 +413,39 @@ export default function GullyScore() {
       m.needNewBowler = false;
       m.needNewBatsmen = false;
 
-      // 2. Revert individual personal batsman configurations
+      // 2. 🌟 SOLID REVERSION: Pull who faced the ball from history arrays first
       if (inn.historyStrikerIdx && inn.historyStrikerIdx.length > 0) {
         const prevStriker = inn.historyStrikerIdx.pop();
         
+        // Find exactly who got run out if it was a dismissal play
         if (isWicket) {
-          // Find which batsman actually got dismissed (For Run Outs, it could be striker or non-striker)
-          const victimIdx = (isRunOut && last.dismissedPosition === "non_striker") ? inn.nonStrikerIdx : prevStriker;
-          
+          const victimIdx = (isRunOut && last.dismissedPosition === "non_striker") ? (inn.historyNonStrikerIdx[inn.historyNonStrikerIdx.length - 1]) : prevStriker;
           if (inn.batsmen[victimIdx]) {
             inn.batsmen[victimIdx].out = false;
             inn.batsmen[victimIdx].outDesc = "";
           }
-
-          // 🌟 FIX: If it was a Run Out, roll back the completed runs from the striker's profile!
-          if (isRunOut && inn.batsmen[prevStriker]) {
-            inn.batsmen[prevStriker].runs = Math.max(0, inn.batsmen[prevStriker].runs - deliveryRuns);
-            inn.batsmen[prevStriker].balls = Math.max(0, inn.batsmen[prevStriker].balls - 1);
-            if (deliveryRuns === 4) inn.batsmen[prevStriker].fours = Math.max(0, inn.batsmen[prevStriker].fours - 1);
-            if (deliveryRuns === 6) inn.batsmen[prevStriker].sixes = Math.max(0, inn.batsmen[prevStriker].sixes - 1);
-          }
-
-          // Only decrement nextBatsmanIdx if a new bench player was brought out
-          if (!isRetiredHurt) {
-            inn.nextBatsmanIdx = Math.max(0, inn.nextBatsmanIdx - 1);
-          }
-        } else if (!isWide && !isRetiredHurt) {
-          // Revert standard batsman counts
-          if (inn.batsmen[prevStriker]) {
-            if (!isWide && !isBye && !isLegBye) {
-              inn.batsmen[prevStriker].runs = Math.max(0, inn.batsmen[prevStriker].runs - deliveryRuns);
-            }
-            inn.batsmen[prevStriker].balls = Math.max(0, inn.batsmen[prevStriker].balls - 1);
-            if (!isWide && !isBye && !isLegBye && deliveryRuns === 4) inn.batsmen[prevStriker].fours = Math.max(0, inn.batsmen[prevStriker].fours - 1);
-            if (!isWide && !isBye && !isLegBye && deliveryRuns === 6) inn.batsmen[prevStriker].sixes = Math.max(0, inn.batsmen[prevStriker].sixes - 1);
-          }
         }
+
+        // Deduct runs and balls from the true historical striker who faced the delivery
+        if (inn.batsmen[prevStriker] && !isRetiredHurt) {
+          if (!isWicket && !isWide && !isBye && !isLegBye) {
+            inn.batsmen[prevStriker].runs = Math.max(0, inn.batsmen[prevStriker].runs - deliveryRuns);
+          } else if (isRunOut && !isWide) {
+            inn.batsmen[prevStriker].runs = Math.max(0, inn.batsmen[prevStriker].runs - deliveryRuns);
+          }
+          
+          if (!isWide) {
+            inn.batsmen[prevStriker].balls = Math.max(0, inn.batsmen[prevStriker].balls - 1);
+          }
+          if (!isWide && !isBye && !isLegBye && deliveryRuns === 4) inn.batsmen[prevStriker].fours = Math.max(0, inn.batsmen[prevStriker].fours - 1);
+          if (!isWide && !isBye && !isLegBye && deliveryRuns === 6) inn.batsmen[prevStriker].sixes = Math.max(0, inn.batsmen[prevStriker].sixes - 1);
+        }
+
+        if (isWicket && !isRetiredHurt) {
+          inn.nextBatsmanIdx = Math.max(0, inn.nextBatsmanIdx - 1);
+        }
+
+        // Restore active creases to their exact historical positions before rotation
         inn.strikerIdx = prevStriker;
       }
       
@@ -501,6 +471,10 @@ export default function GullyScore() {
         inn.currentBowlerIdx = prevBowler;
       }
 
+      // Flush running params
+      inn.runOutVictimCreaseSlot = null;
+      inn.runOutStrikeIntent = null;
+
       return m;
     });
     showToast("Last ball undone");
@@ -523,6 +497,8 @@ export default function GullyScore() {
     const match = {
       id: generateId(), date: now(), overs: config.overs,
       team1: firstBatId, team2: secondBatId, 
+      tournamentId: config.tournamentId || null, // ✅ Tracks parent league context
+      tournamentMatchId: config.tournamentMatchId || null,
       currentInnings: 0, completed: false,
       winner: null, winMargin: null,
       needNewBatsmen: true,  // 🌟 Force the openers selection modal to pop up immediately
@@ -550,13 +526,45 @@ export default function GullyScore() {
     showToast("Match started! 🏏");
   }, [teams, showToast]);
 
+  // const finishMatch = useCallback(() => {
+  //   if (!liveMatch) return;
+  //   setHistory(h => [liveMatch, ...h]);
+  //   setLiveMatch(null);
+  //   setTab("history");
+  //   showToast("Match saved!");
+  // }, [liveMatch, showToast]);
+
   const finishMatch = useCallback(() => {
-    if (!liveMatch) return;
-    setHistory(h => [liveMatch, ...h]);
-    setLiveMatch(null);
-    setTab("history");
-    showToast("Match saved!");
-  }, [liveMatch, showToast]);
+  if (!liveMatch) return;
+  
+  // ✅ LOGIC PATCH: If match belongs to a league, update its schedule block inside tournaments state!
+  if (liveMatch.tournamentId) {
+    setTournaments(prevTournaments => prevTournaments.map(t => {
+      if (t.id !== liveMatch.tournamentId) return t;
+      return {
+        ...t,
+        matches: t.matches.map(m => {
+          if (m.id !== liveMatch.tournamentMatchId) return m;
+          const i1 = liveMatch.innings[0];
+          const i2 = liveMatch.innings[1];
+          return {
+            ...m,
+            result: liveMatch.winner,
+            winMargin: liveMatch.winMargin,
+            t1Runs: i1.runs, t1Balls: i1.balls, t1Wickets: i1.wickets,
+            t2Runs: i2.runs, t2Balls: i2.balls, t2Wickets: i2.wickets,
+            matchData: liveMatch // Stores full stats reference for NRR loop checks
+          };
+        })
+      };
+    }));
+  }
+
+  setHistory(h => [liveMatch, ...h]);
+  setLiveMatch(null);
+  setTab("history");
+  showToast("Match saved securely! 🎉");
+}, [liveMatch, showToast]);
   
   // ── Render ──────────────────────────────────────────────────────────────────
   const renderPage = () => {
@@ -869,12 +877,6 @@ function MatchPage({ liveMatch, teams, getTeam, applyBall, undoLastBall, onFinis
       const nm = JSON.parse(JSON.stringify(m));
       const currentInn = nm.innings[nm.currentInnings];
 
-      const isCurrentlyOnField = idx === currentInn.strikerIdx || idx === currentInn.nonStrikerIdx;
-      if (isCurrentlyOnField) {
-        alert("⚠️ Telemetry Guard: This batsman is already active out on the crease ends!");
-        return m;
-      }
-
       if (currentInn.strikerIdx === -1) {
         currentInn.strikerIdx = idx;
         nm.needNewBatsmen = true; 
@@ -883,6 +885,10 @@ function MatchPage({ liveMatch, teams, getTeam, applyBall, undoLastBall, onFinis
       }
 
       if (currentInn.nonStrikerIdx === -1) {
+        if (idx === currentInn.strikerIdx) {
+          alert("Gully Rules Error: Same player cannot open from both ends!");
+          return m;
+        }
         currentInn.nonStrikerIdx = idx;
         const maxSelectedIdx = Math.max(currentInn.strikerIdx, currentInn.nonStrikerIdx);
         currentInn.nextBatsmanIdx = maxSelectedIdx + 1;
@@ -891,40 +897,16 @@ function MatchPage({ liveMatch, teams, getTeam, applyBall, undoLastBall, onFinis
         return nm;
       }
 
-      // 🌟 CRICHEROES ADVANCED UMPIRE INTENT DIRECTIVE ROUTING
-      if (currentInn.runOutVictimCreaseSlot) {
-        const victimSlot = currentInn.runOutVictimCreaseSlot;
-        const intent = currentInn.runOutStrikeIntent;
+      const strikerIsOut = currentInn.batsmen[currentInn.strikerIdx]?.out;
+      const nonStrikerIsOut = currentInn.batsmen[currentInn.nonStrikerIdx]?.out;
 
-        // Step 1: Put the new batsman into the physical crease slot vacated by the dead player
-        if (victimSlot === "striker") {
-          currentInn.strikerIdx = idx;
-        } else {
-          currentInn.nonStrikerIdx = idx;
-        }
-
-        // Step 2: If the umpire explicitly commanded that the new player takes strike, 
-        // enforce that they are listed in the strikerIdx slot!
-        if (intent === "new_batsman") {
-          if (victimSlot !== "striker") {
-            // Swap indices so the incoming player sits directly on strikerIdx
-            const temp = currentInn.strikerIdx;
-            currentInn.strikerIdx = currentInn.nonStrikerIdx;
-            currentInn.nonStrikerIdx = temp;
-          }
-        } else if (intent === "surviving_batsman") {
-          if (victimSlot === "striker") {
-            // Swap indices so the surviving player gets pulled into strikerIdx instead
-            const temp = currentInn.strikerIdx;
-            currentInn.strikerIdx = currentInn.nonStrikerIdx;
-            currentInn.nonStrikerIdx = temp;
-          }
-        }
+      // Stable mapping block: correctly replaces the out or retired striker
+      if (strikerIsOut) {
+        currentInn.strikerIdx = idx;
+      } else if (nonStrikerIsOut) {
+        currentInn.nonStrikerIdx = idx;
       } else {
-        // Standard non-runout wicket replacement routing
-        const strikerIsOut = currentInn.batsmen[currentInn.strikerIdx]?.out;
-        if (strikerIsOut) currentInn.strikerIdx = idx;
-        else currentInn.nonStrikerIdx = idx;
+        currentInn.strikerIdx = idx;
       }
       
       const highestActiveIdx = Math.max(currentInn.strikerIdx, currentInn.nonStrikerIdx);
@@ -932,9 +914,6 @@ function MatchPage({ liveMatch, teams, getTeam, applyBall, undoLastBall, onFinis
         currentInn.nextBatsmanIdx = highestActiveIdx + 1;
       }
       
-      // Flush transaction parameters completely
-      currentInn.runOutVictimCreaseSlot = null;
-      currentInn.runOutStrikeIntent = null;
       nm.needNewBatsmen = false;
       showToast("New batsman has taken guard!");
       return nm;
@@ -1162,20 +1141,22 @@ function MatchPage({ liveMatch, teams, getTeam, applyBall, undoLastBall, onFinis
                   <>
                     <div style={{fontSize:18, fontWeight:800, marginBottom:12, color:"var(--red)"}}>🎯 Select Dismissal Type</div>
                     <div style={{display:"grid", gridTemplateColumns:"repeat(2, 1fr)", gap:10}}>
-                      {["Bowled", "Caught", "Stumped", "LBW", "Run Out", "Retired Hurt"].map(w => (
-                        <button key={w} className="btn btn-secondary" style={{padding:"14px 10px", fontWeight:700, fontSize:13}}
+                      {/* Look inside your MatchPage scoringPipeline selection panel block, find the map row, and change to this: */}
+                      {["Bowled", "Caught", "Stumped", "LBW", "Run Out", "Retired"].map(w => (
+                        <button key={w} className="btn btn-secondary" style={{padding:"14px 10px", fontStyle:"normal", fontWeight:700, fontSize:13}}
                           onClick={() => {
                             if (w === "Run Out") {
                               setScoringPipeline({ stage: "RUN_OUT_RUNS" });
                             } else if (["Caught", "Stumped"].includes(w)) {
                               setScoringPipeline({ stage: "PICK_BOWLER_CREDIT", wicketType: w });
                             } else {
+                              // Automatically translates tactical retired runs smoothly here:
                               applyBall({ type: "wicket", runs: 0, wicketType: w });
                               setScoringPipeline(null);
                             }
                           }}
                         >
-                          {w}
+                          {w === "Retired" ? "Retired Hurt" : w}
                         </button>
                       ))}
                     </div>
@@ -1367,8 +1348,9 @@ function MatchPage({ liveMatch, teams, getTeam, applyBall, undoLastBall, onFinis
               {inn.strikerIdx !== -1 && inn.nonStrikerIdx === -1 && "🏃 Select Opening Non-Striker"}
               {inn.strikerIdx !== -1 && inn.nonStrikerIdx !== -1 && "🏏 Select New Batsman"}
             </div>
+            {/* Look inside the batsman modal in MatchPage and update this line: */}
             {inn.batsmen.map((b, i) => {
-              // ✅ FIX: A batsman is available if they haven't faced a ball YET, OR if they are marked Retired Hurt!
+              // Matches the stable version's string field definition perfectly
               const isAvailable = b.balls === 0 || b.outDesc === "Retired Hurt";
               const isCurrentlyOnField = i === inn.strikerIdx || i === inn.nonStrikerIdx;
 
@@ -1388,11 +1370,7 @@ function MatchPage({ liveMatch, teams, getTeam, applyBall, undoLastBall, onFinis
                     onClick={() => selectBatsman(i)}
                   >
                     <span>{b.name}</span>
-                    {b.outDesc === "Retired Hurt" && (
-                      <span style={{color:"var(--amber)", fontSize:11, float:"right", fontWeight:700, letterSpacing:0.5}}>
-                        🔄 RE-ENTER ({b.runs} runs)
-                      </span>
-                    )}
+                    {b.outDesc === "Retired Hurt" && <span style={{color:"var(--amber)", fontSize:11, float:"right", fontWeight:700}}>🔄 RE-ENTER</span>}
                   </button>
                 );
               }
@@ -1458,6 +1436,9 @@ function InlineScorecardView({ match, getTeam }) {
   const [tab, setTab] = useState(0);
   const inn = match.innings[tab];
   const battingTeam = getTeam(inn.team);
+  
+  const fmtOversLocal = (balls) => `${Math.floor(balls / 6)}.${balls % 6}`;
+
   return (
     <div style={{padding:"0 16px"}}>
       <div style={{display:"flex", marginBottom:16, borderBottom:"1px solid var(--border)"}}>
@@ -1468,18 +1449,21 @@ function InlineScorecardView({ match, getTeam }) {
         ))}
       </div>
       <div style={{fontFamily:"Bebas Neue", fontSize:36, color:"var(--text)", marginBottom:8}}>
-        {inn.runs}/{inn.wickets} <span style={{fontSize:20, color:"var(--muted)"}}>{fmtOvers(inn.balls)} ov</span>
+        {inn.runs}/{inn.wickets} <span style={{fontSize:20, color:"var(--muted)"}}>{fmtOversLocal(inn.balls)} ov</span>
       </div>
       <table style={{width:"100%", borderCollapse:"collapse", marginBottom:16}}>
         <thead><tr>
           {["Batsman","R","B","4s","6s"].map(h => <th key={h} style={{textAlign:h==="Batsman"?"left":"right", fontSize:11, color:"var(--muted)", padding:"6px 4px", borderBottom:"1px solid var(--border)", fontWeight:700, letterSpacing:.4}}>{h}</th>)}
         </tr></thead>
         <tbody>
-          {inn.batsmen.filter(b => b.balls > 0 || !b.out).map((b,i) => (
+          {/* ✅ FIX: Filters to keep zero-ball run-outs and retired hurt players visible in live tracking tabs */}
+          {inn.batsmen.filter(b => b.balls > 0 || b.out || b.outDesc === "Retired Hurt").map((b,i) => (
             <tr key={i}>
-              <td style={{padding:"8px 4px", fontSize:13, fontWeight:b.out?400:700, color:b.out?"var(--muted)":"var(--text)"}}>
-                {b.name}{b.out ? <span style={{fontSize:11, color:"var(--muted)"}}> †</span> : ""}
-                {i === inn.strikerIdx && !b.out && <span style={{color:"var(--green)"}}> *</span>}
+              <td style={{padding:"8px 4px", fontSize:13, fontWeight:(b.out || b.outDesc === "Retired Hurt") ? 400 : 700, color:(b.out || b.outDesc === "Retired Hurt") ? "var(--muted)" : "var(--text)"}}>
+                {b.name}
+                {b.out ? <span style={{fontSize:11, color:"var(--muted)"}}> †</span> : ""}
+                {b.outDesc === "Retired Hurt" && <span style={{fontSize:11, color:"var(--amber)", fontWeight:600}}> (RH)</span>}
+                {i === inn.strikerIdx && !b.out && b.outDesc !== "Retired Hurt" && <span style={{color:"var(--green)"}}> *</span>}
               </td>
               {[b.runs, b.balls, b.fours, b.sixes].map((v,j) => <td key={j} style={{textAlign:"right", padding:"8px 4px", fontSize:13, fontWeight:600}}>{v}</td>)}
             </tr>
@@ -1495,7 +1479,7 @@ function InlineScorecardView({ match, getTeam }) {
           {inn.bowlers.filter(b => b.balls > 0).map((b,i) => (
             <tr key={i}>
               <td style={{padding:"8px 4px", fontSize:13, fontWeight:600}}>{b.name}</td>
-              <td style={{textAlign:"right", padding:"8px 4px", fontSize:13}}>{fmtOvers(b.balls)}</td>
+              <td style={{textAlign:"right", padding:"8px 4px", fontSize:13}}>{fmtOversLocal(b.balls)}</td>
               <td style={{textAlign:"right", padding:"8px 4px", fontSize:13}}>{b.runs}</td>
               <td style={{textAlign:"right", padding:"8px 4px", fontSize:13, fontWeight:700, color:b.wickets>0?"var(--green)":"var(--text)"}}>{b.wickets}</td>
             </tr>
@@ -1518,7 +1502,9 @@ const generateScorecardImage = async (match, getTeam) => {
 
   // Build individual innings templates dynamically based on match state
   const renderInningsHTML = (inn, teamName) => {
-    const activeBatters = inn.batsmen.filter(b => b.balls > 0 || b.outDesc);
+    // const activeBatters = inn.batsmen.filter(b => b.balls > 0 || b.outDesc);
+    // const activeBatters = inn.batsmen.filter(b => b.balls > 0 || b.outDesc === "Retired Hurt" || b.out);
+    const activeBatters = inn.batsmen.filter(b => b.balls > 0 || b.out || b.outDesc === "Retired Hurt");
     const activeBowlers = inn.bowlers.filter(b => b.balls > 0);
     const totalExtras = Object.values(inn.extras).reduce((a, b) => a + b, 0);
 
@@ -1766,7 +1752,6 @@ function MatchResultPage({ match, getTeam, onSave, onNew }) {
     </div>
   );
 }
-
 // ─── New Match Page ───────────────────────────────────────────────────────────
 function NewMatchPage({ teams, onStart, onBack }) {
   const [team1, setTeam1] = useState("");
@@ -1965,7 +1950,6 @@ function EditTeamPage({ team, onSave, onBack, onDelete }) {
   );
 }
 
-// ─── History Page ─────────────────────────────────────────────────────────────
 // ─── HISTORY PAGE VISUAL PANEL COMPONENT ──────────────────────────────────────
 function HistoryPage({ history, teams, onView, getTeam }) {
   // Quick inline helper utility mapping format to avoid missing scope properties
@@ -2114,15 +2098,16 @@ function ScorecardPage({ match, teams, onBack }) {
   const battingTeam = getTeam(inn.team);
   const bowlingTeam = getTeam(inn.team === match.team1 ? match.team2 : match.team1);
   const winner = getTeam(match.winner);
-  const winnerInnings = winner ? match.innings.find(i => i.team === winner.id) : null;
   const totalExtras = Object.values(inn.extras).reduce((a,b)=>a+b,0);
+
+  const fmtOversLocal = (balls) => `${Math.floor(balls / 6)}.${balls % 6}`;
 
   return (
     <div className="page">
       <div className="page-header">
         <button className="back-btn" onClick={onBack}><Icon.Back /></button>
         <div>
-          <div className="page-title">{getTeam(match.team1)?.name} vs {getTeam(match.team2)?.name}</div>
+          <div className="page-title" style={{fontSize:16}}>{getTeam(match.team1)?.name} vs {getTeam(match.team2)?.name}</div>
           <div style={{fontSize:11, color:"var(--muted)"}}>{fmtDate(match.date)} · {match.overs} overs</div>
         </div>
       </div>
@@ -2147,7 +2132,7 @@ function ScorecardPage({ match, teams, onBack }) {
       <div className="px16">
         <div style={{display:"flex", justifyContent:"space-between", alignItems:"baseline", marginBottom:12}}>
           <div style={{fontFamily:"Bebas Neue", fontSize:40}}>{inn.runs}/{inn.wickets}</div>
-          <div style={{color:"var(--muted)", fontSize:14}}>{fmtOvers(inn.balls)} overs · RR {calcRR(inn.runs, inn.balls)}</div>
+          <div style={{color:"var(--muted)", fontSize:14}}>{fmtOversLocal(inn.balls)} overs · RR {calcRR(inn.runs, inn.balls)}</div>
         </div>
 
         {/* Batting */}
@@ -2158,19 +2143,21 @@ function ScorecardPage({ match, teams, onBack }) {
               {["Batsman","R","B","4s","6s","SR"].map(h => <th key={h} className="pts-table" style={{textAlign:h==="Batsman"?"left":"right", fontSize:11, color:"var(--muted)", padding:"6px 4px", borderBottom:"1px solid var(--border)"}}>{h}</th>)}
             </tr></thead>
             <tbody>
-              {inn.batsmen.filter(b => b.balls > 0).map((b,i) => {
+              {/* ✅ FIX: Expanded conditional matching prevents zero-ball dismissals from being dropped out */}
+              {inn.batsmen.filter(b => b.balls > 0 || b.out || b.outDesc === "Retired Hurt").map((b,i) => {
                 const sr = b.balls > 0 ? ((b.runs/b.balls)*100).toFixed(0) : "-";
+                const isRetHurt = b.outDesc === "Retired Hurt";
                 return (
                   <tr key={i}>
-                    <td style={{padding:"8px 4px", fontSize:13, fontWeight:b.out?400:700, color:b.out?"var(--muted)":"var(--text)"}}>
-                      {b.name} {b.out && <span style={{fontSize:11, color:"var(--muted)"}}>({b.outDesc})</span>}
+                    <td style={{padding:"8px 4px", fontSize:13, fontWeight:b.out ? 400 : 700, color:b.out ? "var(--muted)" : "var(--text)"}}>
+                      {b.name} {b.outDesc && <span style={{fontSize:11, color: isRetHurt ? "var(--amber)" : "var(--muted)", fontWeight: isRetHurt ? 600 : 400}}>{isRetHurt ? "(Retired Hurt)" : `(${b.outDesc})`}</span>}
                     </td>
                     {[b.runs,b.balls,b.fours,b.sixes,sr].map((v,j) => <td key={j} style={{textAlign:"right", padding:"8px 4px", fontSize:13, fontWeight: j===0?"700":"500"}}>{v}</td>)}
                   </tr>
                 );
               })}
               <tr><td colSpan={6} style={{padding:"8px 4px", fontSize:12, color:"var(--muted)"}}>Extras: {totalExtras} (W {inn.extras.wide}, NB {inn.extras.noBall}, B {inn.extras.bye}, LB {inn.extras.legBye})</td></tr>
-              <tr style={{borderTop:"1px solid var(--border)"}}><td style={{padding:"8px 4px", fontWeight:800, fontSize:14}}>Total</td><td colSpan={5} style={{textAlign:"right", padding:"8px 4px", fontWeight:800, fontSize:14}}>{inn.runs}/{inn.wickets} ({fmtOvers(inn.balls)} ov)</td></tr>
+              <tr style={{borderTop:"1px solid var(--border)"}}><td style={{padding:"8px 4px", fontWeight:800, fontSize:14}}>Total</td><td colSpan={5} style={{textAlign:"right", padding:"8px 4px", fontWeight:800, fontSize:14}}>{inn.runs}/{inn.wickets} ({fmtOversLocal(inn.balls)} ov)</td></tr>
             </tbody>
           </table>
         </div>
@@ -2187,7 +2174,7 @@ function ScorecardPage({ match, teams, onBack }) {
               return (
                 <tr key={i}>
                   <td style={{padding:"8px 4px", fontSize:13, fontWeight:600}}>{b.name}</td>
-                  <td style={{textAlign:"right", padding:"8px 4px", fontSize:13}}>{fmtOvers(b.balls)}</td>
+                  <td style={{textAlign:"right", padding:"8px 4px", fontSize:13}}>{fmtOversLocal(b.balls)}</td>
                   <td style={{textAlign:"right", padding:"8px 4px", fontSize:13}}>0</td>
                   <td style={{textAlign:"right", padding:"8px 4px", fontSize:13}}>{b.runs}</td>
                   <td style={{textAlign:"right", padding:"8px 4px", fontSize:13, fontWeight:700, color:b.wickets>0?"var(--green)":"var(--text)"}}>{b.wickets}</td>
@@ -2293,20 +2280,53 @@ function TournamentPage({ tournament, teams, onBack, onUpdate }) {
   const getTeam = (id) => teams.find(t => t.id === id);
   const [activeTab, setActiveTab] = useState("schedule");
 
-  // Points table calc
+  // Professional ICC Playing Conditions Points Table Calculation Matrix
   const pts = tournament.teams.map(id => {
     const team = getTeam(id);
-    const tMatches = tournament.matches.filter(m => m.result && (m.team1===id || m.team2===id));
-    const wins = tMatches.filter(m => m.result===id).length;
+    const tMatches = tournament.matches.filter(m => m.result && (m.team1 === id || m.team2 === id));
+    const wins = tMatches.filter(m => m.result === id).length;
     const losses = tMatches.length - wins;
-    // NRR
-    let forR=0, forB=0, agR=0, agB=0;
+    
+    let forR = 0, forB = 0, agR = 0, agB = 0;
+    
     tMatches.forEach(m => {
-      if (m.team1 === id) { forR += m.t1Runs; forB += m.t1Balls; agR += m.t2Runs; agB += m.t2Balls; }
-      else { forR += m.t2Runs; forB += m.t2Balls; agR += m.t1Runs; agB += m.t1Balls; }
+      const scheduledBalls = tournament.overs * 6;
+      
+      // Load available match data parameters safely or fallback to default structures
+      const matchInnings1 = m.matchData?.innings?.[0] || { wickets: 0, batsmen: [] };
+      const matchInnings2 = m.matchData?.innings?.[1] || { wickets: 0, batsmen: [] };
+      
+      // Determine max team player sizes dynamically based on recorded rosters or fallback to 11 players
+      const maxWicketsT1 = matchInnings1.batsmen?.length ? (matchInnings1.batsmen.length - 1) : 10;
+      const maxWicketsT2 = matchInnings2.batsmen?.length ? (matchInnings2.batsmen.length - 1) : 10;
+
+      if (m.team1 === id) {
+        forR += m.t1Runs;
+        // ✅ NRR PATCH: If bowled all-out, apply full scheduled quota penalty
+        forB += (m.t1Wickets >= maxWicketsT1) ? scheduledBalls : m.t1Balls;
+        
+        agR += m.t2Runs;
+        agB += (m.t2Wickets >= maxWicketsT2) ? scheduledBalls : m.t2Balls;
+      } else {
+        forR += m.t2Runs;
+        forB += (m.t2Wickets >= maxWicketsT2) ? scheduledBalls : m.t2Balls;
+        
+        agR += m.t1Runs;
+        agB += (m.t1Wickets >= maxWicketsT1) ? scheduledBalls : m.t1Balls;
+      }
     });
-    return { id, name:team?.name||id, color:team?.color||"var(--green)", played:tMatches.length, wins, losses, pts:wins*2, nrr:calcNRR(forR,forB,agR,agB) };
-  }).sort((a,b) => b.pts-a.pts || parseFloat(b.nrr)-parseFloat(a.nrr));
+    
+    return { 
+      id, 
+      name: team?.name || id, 
+      color: team?.color || "var(--green)", 
+      played: tMatches.length, 
+      wins, 
+      losses, 
+      pts: wins * 2, 
+      nrr: calcNRR(forR, forB, agR, agB) 
+    };
+  }).sort((a, b) => b.pts - a.pts || parseFloat(b.nrr) - parseFloat(a.nrr));
 
   return (
     <div className="page">
