@@ -28,9 +28,44 @@ const SEED = (() => {
 })();
 
 // ─── Storage ──────────────────────────────────────────────────────────────────
-const LS = {
-  load: (key, def) => { try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : def; } catch { return def; } },
-  save: (key, val) => { try { localStorage.setItem(key, JSON.stringify(val)); } catch {} },
+// Change this from localhost so it points directly to your deployed Vercel functions!
+const API_URL = "/api";
+
+const DB = {
+  getCollection: async (collectionName) => {
+    try {
+      const response = await fetch(`${API_URL}/${collectionName}`);
+      if (!response.ok) throw new Error("Database read mismatch");
+      return await response.json();
+    } catch (err) {
+      console.error(`Error loading collection ${collectionName}:`, err);
+      return [];
+    }
+  },
+  insertDocument: async (collectionName, documentPayload) => {
+    try {
+      const response = await fetch(`${API_URL}/${collectionName}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(documentPayload)
+      });
+      return await response.json();
+    } catch (err) {
+      console.error(`Failed pushing document to ${collectionName}:`, err);
+    }
+  },
+  updateDocument: async (collectionName, docId, updatePayload) => {
+    try {
+      const response = await fetch(`${API_URL}/${collectionName}/${docId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updatePayload)
+      });
+      return await response.json();
+    } catch (err) {
+      console.error(`Failed syncing document ${docId} on ${collectionName}:`, err);
+    }
+  }
 };
 
 // ─── Icons (inline SVG components) ───────────────────────────────────────────
@@ -195,20 +230,34 @@ const STYLES = `
 // ─── Main App ─────────────────────────────────────────────────────────────────
 
 export default function GullyScore() {
-  const [teams, setTeams]         = useState(() => LS.load("gs_teams", SEED.teams));
-  const [history, setHistory]     = useState(() => LS.load("gs_history", SEED.history));
-  const [tournaments, setTournaments] = useState(() => LS.load("gs_tournaments", SEED.tournaments));
-  const [liveMatch, setLiveMatch] = useState(() => LS.load("gs_live", null));
-  const [tab, setTab]             = useState("home");
-  const [toast, setToast]         = useState(null);
-  const [subpage, setSubpage]     = useState(null);  // { type, data }
+  const [teams, setTeams]             = useState(SEED.teams);
+  const [history, setHistory]         = useState([]);
+  const [tournaments, setTournaments] = useState([]);
+  const [liveMatch, setLiveMatch]     = useState(null);
+  const [tab, setTab]                 = useState("home");
+  const [toast, setToast]             = useState(null);
+  const [subpage, setSubpage]         = useState(null);  
   const toastRef = useRef(null);
 
-  // Persist
-  useEffect(() => { LS.save("gs_teams", teams); }, [teams]);
-  useEffect(() => { LS.save("gs_history", history); }, [history]);
-  useEffect(() => { LS.save("gs_tournaments", tournaments); }, [tournaments]);
-  useEffect(() => { LS.save("gs_live", liveMatch); }, [liveMatch]);
+  // 🌍 Global Cloud Sync: Fetch fresh entries from MongoDB Atlas on load/tab switch
+  useEffect(() => {
+    const syncCloudDatabase = async () => {
+      try {
+        const res = await fetch("/api/history");
+        if (res.ok) {
+          const cloudHistory = await res.json();
+          setHistory(cloudHistory);
+        }
+      } catch (err) {
+        console.error("Cloud synchronization failed:", err);
+      }
+    };
+    
+    // Auto-polls your database cluster whenever navigating the app panels
+    if (tab === "home" || tab === "history") {
+      syncCloudDatabase();
+    }
+  }, [tab]);
 
   const showToast = useCallback((msg) => {
     setToast(msg);
@@ -226,6 +275,14 @@ export default function GullyScore() {
     setHistory(currentHistory => {
       const isAlreadySaved = currentHistory.some(m => m.id === matchToSave.id);
       if (!isAlreadySaved) {
+        
+        // 🚀 Cloud Dispatch: Push the final ledger payload straight to MongoDB Atlas
+        fetch("/api/history", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(matchToSave)
+        }).catch(err => console.error("Auto-save sync failed:", err));
+
         if (matchToSave.tournamentId) {
           setTournaments(prevTournaments => prevTournaments.map(t => {
             if (t.id !== matchToSave.tournamentId) return t;

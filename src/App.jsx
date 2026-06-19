@@ -16,11 +16,7 @@ const calcNRR = (forR, forB, agR, agB) => {
 
 // ─── Sample seed data ─────────────────────────────────────────────────────────
 const SEED = (() => {
-  const teams = [
-    { id:"t1", name:"Street Strikers",   color:"#00D46A", players:["Rahul S","Karan M","Vijay P","Suresh T","Manoj K","Rohit D","Arjun B","Pranav S","Deepak R","Sanjay N","Lokesh V"] },
-    { id:"t2", name:"Colony Champions",  color:"#FFB800", players:["Amit J","Nikhil C","Ravi A","Sunil G","Pradeep K","Harish M","Kiran B","Vinod P","Rakesh S","Ganesh T","Srinivas R"] },
-  ];
-  
+  const teams = [];
   const history = [];
   const tournaments = [];
 
@@ -56,7 +52,9 @@ const DB = {
   },
   updateDocument: async (collectionName, docId, updatePayload) => {
     try {
-      const response = await fetch(`${API_URL}/${collectionName}/${docId}`, {
+      // Patched to seamlessly route via standard query strings (?id=...) 
+      // instead of legacy sub-resources (/${collectionName}/${docId})
+      const response = await fetch(`${API_URL}/${collectionName}?id=${docId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updatePayload)
@@ -230,7 +228,17 @@ const STYLES = `
 // ─── Main App ─────────────────────────────────────────────────────────────────
 
 export default function GullyScore() {
-  const [teams, setTeams]             = useState(SEED.teams);
+  const [teams, setTeams] = useState(SEED.teams);
+
+  useEffect(() => {
+    const fetchTeams = async () => {
+      const cloudTeams = await DB.getCollection("teams");
+      if (cloudTeams && cloudTeams.length > 0) {
+        setTeams(cloudTeams);
+      }
+    };
+    fetchTeams();
+  }, []); // Fires cleanly on load to fetch teams from your DB cluster
   const [history, setHistory]         = useState([]);
   const [tournaments, setTournaments] = useState([]);
   const [liveMatch, setLiveMatch]     = useState(null);
@@ -632,7 +640,7 @@ export default function GullyScore() {
         case "new_match": return <NewMatchPage teams={teams} onStart={startMatch} onBack={() => setSubpage(null)} />;
         case "scorecard": return <ScorecardPage match={subpage.data} teams={teams} onBack={() => setSubpage(null)} />;
         case "new_team": return <NewTeamPage onSave={(t) => { setTeams(ts => [...ts, t]); setSubpage(null); showToast("Team created! 🎉"); }} onBack={() => setSubpage(null)} />;
-        case "edit_team": return (<EditTeamPage team={subpage.data} onSave={(t) => { setTeams(ts => ts.map(x => x.id === t.id ? t : x)); setSubpage(null); showToast("Team updated!"); }} onBack={() => setSubpage(null)} onDelete={(id) => { setTeams(ts => ts.filter(t => t.id !== id)); setSubpage(null); showToast("Team deleted"); }} />);
+        case "edit_team": return (<EditTeamPage team={subpage.data} onSave={(t) => { setTeams(ts => ts.map(x => x.id === t.id ? t : x)); setSubpage(null); showToast("Team updated!"); }} onBack={() => setSubpage(null)} onDelete={(id) => { setTeams(ts => ts.filter(x => x.id !== id)); setSubpage(null); showToast("Team deleted"); }} />);
         case "new_tournament": return <NewTournamentPage teams={teams} onSave={(t) => { setTournaments(ts => [t, ...ts]); setSubpage(null); showToast("Tournament created! 🏆"); }} onBack={() => setSubpage(null)} />;
         case "tournament": return <TournamentPage tournament={subpage.data} teams={teams} onBack={() => setSubpage(null)} onUpdate={(t) => setTournaments(ts => ts.map(x => x.id === t.id ? t : x))} />;
       }
@@ -1831,7 +1839,11 @@ function NewTeamPage({ onSave, onBack }) {
           </button>
         </div>
         <button className="btn btn-primary" disabled={!name || players.filter(p=>p.trim()).length < 2} style={{opacity: name && players.filter(p=>p.trim()).length>=2?1:.4}}
-          onClick={() => onSave({ id:generateId(), name:name.trim(), color, players:players.filter(p=>p.trim()) })}>
+          onClick={async () => {
+            const newTeam = { id:generateId(), name:name.trim(), color, players:players.filter(p=>p.trim()) };
+            await DB.insertDocument("teams", newTeam); // Save to MongoDB
+            onSave(newTeam);
+          }}>
           Create Team
         </button>
       </div>
@@ -1843,34 +1855,111 @@ function EditTeamPage({ team, onSave, onBack, onDelete }) {
   const [name, setName] = useState(team.name);
   const [color, setColor] = useState(team.color);
   const [players, setPlayers] = useState([...team.players]);
+
   return (
     <div className="page">
       <div className="page-header">
         <button className="back-btn" onClick={onBack}><Icon.Back /></button>
         <span className="page-title">Edit Team</span>
       </div>
-      <div style={{padding:"0 16px"}}>
-        <div className="form-group"><label className="label">Team Name</label><input className="input" value={name} onChange={e=>setName(e.target.value)} /></div>
+      
+      <div style={{ padding: "0 16px" }}>
+        {/* Team Name Input */}
+        <div className="form-group">
+          <label className="label">Team Name</label>
+          <input className="input" value={name} onChange={e => setName(e.target.value)} />
+        </div>
+
+        {/* Team Color Picker */}
         <div className="form-group">
           <label className="label">Team Color</label>
-          <div style={{display:"flex", gap:10, flexWrap:"wrap"}}>
-            {["#00D46A","#FFB800","#FF4757","#5352ED","#FF6B00","#00BCD4","#9C27B0","#E91E63"].map(c => (
-              <div key={c} onClick={() => setColor(c)} style={{width:36, height:36, borderRadius:10, background:c, border: color===c?"3px solid white":"3px solid transparent", cursor:"pointer"}} />
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            {["#00D46A", "#FFB800", "#FF4757", "#5352ED", "#FF6B00", "#00BCD4", "#9C27B0", "#E91E63"].map(c => (
+              <div 
+                key={c} 
+                onClick={() => setColor(c)} 
+                style={{
+                  width: 36, 
+                  height: 36, 
+                  borderRadius: 10, 
+                  background: c, 
+                  border: color === c ? "3px solid white" : "3px solid transparent", 
+                  cursor: "pointer"
+                }} 
+              />
             ))}
           </div>
         </div>
+
+        {/* Players List Section */}
         <div className="form-group">
           <label className="label">Players</label>
           {players.map((p, i) => (
-            <div key={i} style={{display:"flex", gap:8, marginBottom:8}}>
-              <input className="input" value={p} onChange={e => setPlayers(ps => ps.map((v,j) => j===i ? e.target.value : v))} />
-              <button className="btn btn-danger btn" style={{flexShrink:0, padding:"10px 12px"}} onClick={() => setPlayers(ps => ps.filter((_,j)=>j!==i))}><Icon.Delete /></button>
+            <div key={i} style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+              <input 
+                className="input" 
+                value={p} 
+                onChange={e => setPlayers(ps => ps.map((v, j) => j === i ? e.target.value : v))} 
+              />
+              <button 
+                className="btn btn-danger btn" 
+                style={{ flexShrink: 0, padding: "10px 12px" }} 
+                onClick={() => setPlayers(ps => ps.filter((_, j) => j !== i))}
+              >
+                <Icon.Delete />
+              </button>
             </div>
           ))}
-          <button className="btn btn-ghost" style={{width:"100%", color:"var(--green)"}} onClick={() => setPlayers(ps => [...ps, ""])}>+ Add Player</button>
+          <button 
+            className="btn btn-ghost" 
+            style={{ width: "100%", color: "var(--green)" }} 
+            onClick={() => setPlayers(ps => [...ps, ""])}
+          >
+            + Add Player
+          </button>
         </div>
-        <button className="btn btn-primary" style={{marginBottom:10}} onClick={() => onSave({...team, name:name.trim(), color, players:players.filter(p=>p.trim())})}>Save Changes</button>
-        <button className="btn btn-danger btn" style={{width:"100%"}} onClick={() => { if(window.confirm("Delete this team?")) onDelete(team.id); }}>Delete Team</button>
+
+        {/* Save Changes Button */}
+        <button 
+          className="btn btn-primary" 
+          style={{ marginBottom: 10 }} 
+          onClick={async () => {
+            const updatedTeam = { 
+              ...team, 
+              name: name.trim(), 
+              color, 
+              players: players.filter(p => p.trim()) 
+            };
+            // App.jsx DB helper handles query routing (?id=...) perfectly now
+            await DB.updateDocument("teams", team.id, updatedTeam); 
+            onSave(updatedTeam);
+          }}
+        >
+          Save Changes
+        </button>
+
+        {/* Delete Team Button (Patched to use direct endpoint + ID query string) */}
+        <button 
+          className="btn btn-danger btn" 
+          style={{ width: "100%" }} 
+          onClick={async () => { 
+            if (window.confirm("Delete this team?")) {
+              try {
+                const response = await fetch(`/api/teams?id=${team.id}`, { 
+                  method: "DELETE" 
+                });
+                
+                if (!response.ok) throw new Error("Could not drop team record.");
+                onDelete(team.id);
+              } catch (err) {
+                console.error("Failed to delete team via Atlas cluster connection:", err);
+                alert("Could not process request. Check database terminal configurations.");
+              }
+            }
+          }}
+        >
+          Delete Team
+        </button>
       </div>
     </div>
   );
