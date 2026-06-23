@@ -427,8 +427,17 @@ export default function GullyScore() {
       if (!isWicket && deliveryRuns % 2 !== 0) {
         [inn.strikerIdx, inn.nonStrikerIdx] = [inn.nonStrikerIdx, inn.strikerIdx];
       } else if (isRunOut) {
-        // Run out handler updates indices based on final intentions
         if (ball.runs % 2 !== 0) {
+          [inn.strikerIdx, inn.nonStrikerIdx] = [inn.nonStrikerIdx, inn.strikerIdx];
+        }
+
+        const victimIdx = ball.dismissedPosition === "non_striker"
+          ? inn.historyNonStrikerIdx[inn.historyNonStrikerIdx.length - 1]
+          : inn.historyStrikerIdx[inn.historyStrikerIdx.length - 1];
+        const victimIsStriker = inn.strikerIdx === victimIdx;
+        const victimShouldBeStriker = ball.nextFacingIntent === "new_batsman";
+
+        if (victimIsStriker !== victimShouldBeStriker) {
           [inn.strikerIdx, inn.nonStrikerIdx] = [inn.nonStrikerIdx, inn.strikerIdx];
         }
       }
@@ -869,7 +878,7 @@ function MatchPage({ liveMatch, teams, getTeam, applyBall, undoLastBall, onFinis
 
       if (inn.balls > 0 && inn.balls % 6 === 0 && inn.ballHistory.length > 0) {
         const lastBall = inn.ballHistory[inn.ballHistory.length - 1];
-        if (lastBall.type === "wicket" && lastBall.wicketType !== "Retired") {
+        if (lastBall.type === "wicket" && lastBall.wicketType !== "Retired" && lastBall.wicketType !== "Run Out") {
           [inn.strikerIdx, inn.nonStrikerIdx] = [inn.nonStrikerIdx, inn.strikerIdx];
           showToast("Over complete! Ends change — surviving batsman takes strike. 🔄");
         }
