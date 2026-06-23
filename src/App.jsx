@@ -776,7 +776,7 @@ function LiveMatchMini({ match, getTeam }) {
         </div>
         <div style={{textAlign:"right"}}>
           {match.currentInnings === 1 && inn.target && (
-            <div style={{fontSize:12, color:"var(--amber)", fontWeight:700}}>Need {inn.target - inn.runs} off {match.overs*6 - inn.balls} balls</div>
+            <div style={{fontSize:12, color:"var(--amber)", fontWeight:700}}>Need {Math.max(0, inn.target - inn.runs)} off {match.overs*6 - inn.balls} balls</div>
           )}
           <div className="rr-badge" style={{marginTop:4}}>RR {calcRR(inn.runs, inn.balls)}</div>
         </div>
@@ -866,7 +866,7 @@ function MatchPage({ liveMatch, teams, getTeam, applyBall, undoLastBall, onFinis
   const battingTeam = getTeam(inn.team);
   const bowlingTeam = inn.team === liveMatch.team1 ? t2 : t1;
   const maxBalls = liveMatch.overs * 6;
-  const needRuns = liveMatch.currentInnings === 1 && inn.target ? inn.target - inn.runs : null;
+  const needRuns = liveMatch.currentInnings === 1 && inn.target ? Math.max(0, inn.target - inn.runs) : null;
   const needBalls = maxBalls - inn.balls;
 
   const selectBowler = (idx) => {
